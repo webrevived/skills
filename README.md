@@ -26,9 +26,9 @@ your home directory instead. `npx skills update` pulls the latest versions.
 
 ## Skills
 
-| Skill | Category | What it does |
-| ----- | -------- | ------------ |
-| [grill-me](./skills/productivity/grill-me/SKILL.md) | Productivity | Stress-tests a plan or design through relentless, one-at-a-time questioning. |
+| Skill | Category | What it does | Invoke |
+| ----- | -------- | ------------ | ------ |
+| [grill-me](./skills/productivity/grill-me/SKILL.md) | Productivity | Stress-tests a plan or design through relentless, one-at-a-time questioning. | Claude Code/Cursor: `/grill-me`; Codex: `$grill-me` |
 
 ## Contributing
 

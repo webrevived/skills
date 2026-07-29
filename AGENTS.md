@@ -19,6 +19,7 @@ skills/
 └── <category>/
     └── <skill-name>/
         ├── SKILL.md          # required — the skill itself
+        ├── agents/           # optional — host-specific metadata
         ├── references/       # optional — docs the skill tells the agent to read
         └── scripts/          # optional — executable helpers
 ```
@@ -54,10 +55,33 @@ metadata:
 ---
 ```
 
-The `description` is the only thing an agent sees before deciding whether to load the
-skill. Write it as a trigger, not a summary: lead with "Use when ..." and name the
-concrete signals (file types, library names, error messages, phrases the user would say).
-A description that just restates the title gets the skill ignored.
+For implicitly invocable skills, the `description` is the primary information an agent
+sees before deciding whether to load the skill. Write it as a trigger, not a summary:
+lead with "Use when ..." and name the concrete signals (file types, library names, error
+messages, phrases the user would say). A description that just restates the title gets
+the skill ignored.
+
+### Manual-only skills
+
+Use manual-only invocation when a workflow should run only after the user explicitly
+selects it. Support Claude Code and Codex as a pair:
+
+1. Add `disable-model-invocation: true` to `SKILL.md` frontmatter. Claude Code and Cursor
+   then expose the skill as `/<skill-name>` without loading it automatically.
+2. Add `agents/openai.yaml` with:
+
+   ```yaml
+   policy:
+     allow_implicit_invocation: false
+   ```
+
+   Codex then exposes the skill through `$<skill-name>` and `/skills` without invoking it
+   implicitly.
+
+Keep the base `name` and `description` valid for the Agent Skills specification so other
+agents can still install the skill. Host-specific invocation controls may be ignored by
+other agents. Don't set `user-invocable: false`; that hides the skill from user-facing
+invocation instead.
 
 Body conventions:
 
