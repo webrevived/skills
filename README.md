@@ -26,18 +26,16 @@ your home directory instead. `npx skills update` pulls the latest versions.
 
 ## Skills
 
-_None published yet — the first ones are on the way._
-
-<!--
 | Skill | Category | What it does |
 | ----- | -------- | ------------ |
--->
+| [grill-me](./skills/productivity/grill-me/SKILL.md) | Productivity | Stress-tests a plan or design through relentless, one-at-a-time questioning. |
 
 ## Contributing
 
 Skills live at `skills/<category>/<skill-name>/SKILL.md`. Scaffold one with
 `npx skills init <name>`, write the instructions, and open a PR. See
-[AGENTS.md](./AGENTS.md) for the layout and authoring conventions.
+[AGENTS.md](./AGENTS.md) for the `engineering`, `design`, and `productivity` category
+definitions, layout, and authoring conventions.
 
 Test locally before opening a PR:
 

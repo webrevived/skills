@@ -26,6 +26,18 @@ skills/
 Categories are added as skills land; don't invent one for a single skill. If a new skill
 fits an existing category, use it. If it doesn't, propose the category in the PR.
 
+## Categories
+
+Use these broad capability categories:
+
+- `engineering` — frontend, backend, mobile, infrastructure, testing, and architecture
+- `design` — UI/UX, design systems, accessibility, and design-tool workflows
+- `productivity` — research, writing, planning, communication, and general agent workflows
+
+Create a category directory when its first skill lands; don't add empty directories.
+Avoid narrower stack-based categories such as `frontend` or `backend`, and classify
+personal workflows by what they help accomplish rather than under a `personal` category.
+
 ## Authoring a skill
 
 Scaffold with `npx skills init <name>`, then move it under the right category.
