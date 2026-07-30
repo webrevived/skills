@@ -1,0 +1,76 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["verdict", "summary", "findings"],
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": ["clean", "findings"],
+      "description": "\"clean\" when there is nothing worth reporting. An empty findings array is a valid and expected outcome."
+    },
+    "summary": {
+      "type": "string",
+      "description": "Two sentences at most, describing the state of the changeset overall."
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "title",
+          "file",
+          "line",
+          "severity",
+          "category",
+          "body",
+          "repeat_of"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Stable short id within this round, e.g. \"F1\"."
+          },
+          "title": {
+            "type": "string",
+            "description": "One line, under 80 characters, stating the defect."
+          },
+          "file": {
+            "type": "string",
+            "description": "Repo-relative path."
+          },
+          "line": {
+            "type": "integer",
+            "description": "1-indexed line the finding anchors to."
+          },
+          "severity": {
+            "type": "string",
+            "enum": ["critical", "major", "minor"]
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "correctness",
+              "security",
+              "performance",
+              "test-coverage",
+              "maintainability",
+              "architecture",
+              "style",
+              "docs"
+            ]
+          },
+          "body": {
+            "type": "string",
+            "description": "The concrete failure: inputs or state that produce the wrong result, and what to do about it."
+          },
+          "repeat_of": {
+            "type": "string",
+            "description": "When re-reporting a finding from a prior round, the prior round's finding id (e.g. \"R1-F2\"). Empty string when this is new."
+          }
+        }
+      }
+    }
+  }
+}

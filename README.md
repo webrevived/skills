@@ -28,6 +28,7 @@ your home directory instead. `npx skills update` pulls the latest versions.
 
 | Skill | Category | What it does | Invoke |
 | ----- | -------- | ------------ | ------ |
+| [codex-loop](./skills/engineering/codex-loop/SKILL.md) | Engineering | Runs a pinned Codex review and fixer loop over uncommitted changes. | Claude Code/Cursor: `/codex-loop`; Codex: `$codex-loop` |
 | [grill-me](./skills/productivity/grill-me/SKILL.md) | Productivity | Stress-tests a plan or design through relentless, one-at-a-time questioning. | Claude Code/Cursor: `/grill-me`; Codex: `$grill-me` |
 | [write-plan](./skills/productivity/write-plan/SKILL.md) | Productivity | Writes phased implementation plans sized to one AI coding-agent session per phase. | Claude Code/Cursor: `/write-plan`; Codex: `$write-plan` |
 

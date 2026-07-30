@@ -1,0 +1,7 @@
+interface:
+  display_name: "Codex Loop"
+  short_description: "Run a pinned Codex review-and-fix loop"
+  default_prompt: "Use $codex-loop to review and fix the current uncommitted changes until clean or stopped."
+
+policy:
+  allow_implicit_invocation: false
