@@ -1,19 +1,18 @@
 ---
 name: codex-loop
-description: Bounded adversarial Codex review loop — a pinned Codex reviewer performs one full review, then scoped fix-verification rounds with user-gated extensions. Only run when explicitly invoked via /codex-loop or $codex-loop.
+description: Bounded Codex review loop — a pinned Codex reviewer checks staged changes, then performs focused verification of unstaged fixes with user-gated extensions. Only run when explicitly invoked via /codex-loop or $codex-loop.
 disable-model-invocation: true
 argument-hint: '[--here] [--rounds N] [optional review focus]'
 ---
 
-Codex (`gpt-5.6-sol`, `xhigh`) reviews the uncommitted changeset, you triage and fix, the
+Codex (`gpt-5.6-sol`, `xhigh`) reviews the staged changes, you triage and fix, the
 dispositions go back to Codex for bounded verification. This replaces the manual
 paste-between-tools loop without turning every round into another full review.
 
-**Arguments** (all optional; free text after the flags is the build summary, review focus, or both):
+**Arguments** (all optional; free text after the flags is additional review context):
 
 - `--here` — do the triage-and-fix in this session instead of delegating to a subagent
 - `--rounds N` — automatic round budget, default `3`; this is not a target or an absolute ceiling
-- `--no-notes` — send Codex nothing about the author's intent, for a fully cold read
 
 ## Ground rules
 
@@ -32,10 +31,22 @@ paste-between-tools loop without turning every round into another full review.
 ```bash
 git status --porcelain
 command -v codex
+git diff --cached --stat
+git diff --stat
+git ls-files --others --exclude-standard
 ```
 
-If clean, stop — there is nothing to review. If `codex` is unavailable, stop and report the missing
-prerequisite.
+Require a staged-only starting state:
+
+- If `codex` is unavailable, stop and report the missing prerequisite.
+- If `git diff --cached --quiet` succeeds, stop — there are no staged changes to review.
+- If `git diff --quiet` fails, stop and show the pre-existing unstaged changes.
+- If `git ls-files --others --exclude-standard` returns any paths, stop and show the pre-existing
+  untracked files.
+
+Do not stage, stash, delete, or otherwise resolve those files. Ask the user to prepare the intended
+staged changes and invoke the skill again. This clean boundary means every later working-tree
+change belongs to the fixer while the index remains the immutable review baseline.
 
 Resolve the absolute directory containing this loaded `SKILL.md` and store it in `SKILL_DIR`.
 Hosts install skills in different locations, so never hard-code `.claude/skills`,
@@ -90,49 +101,30 @@ cp "$SKILL_DIR/references/review-prompt.md" "$RUN/prompt-$N.md"
 ```
 
 Append any review focus the user passed as arguments under a `## Additional focus` heading.
-
-Then append `## Author's notes` — the build summary for this changeset. When this skill runs in the
-session that built the feature, write it from what you actually did. In a fresh session, the user
-supplies it as the argument. Include:
-
-- what the changeset is for, in a paragraph
-- what is deliberately out of scope, deferred, or stubbed
-- **deviations from the plan, and why** — these are where a reviewer should look hardest, so name
-  them explicitly rather than burying them
-- anything you could not verify, or verified empirically rather than against a spec
-
-**Leave out the justifications** — "this is safe because…", "identity failures split cleanly",
-"nothing can orphan here". Those anchor the reviewer into confirming your claims instead of testing
-them, and that independent cold read is the whole reason Codex is in the loop. They are not wasted:
-they belong in the round-2 rebuttal, where they answer a finding Codex reached on its own. The test
-for each line is whether it states a _fact about scope_ or an _opinion about correctness_ — facts go
-in, opinions wait.
-
-`--no-notes` skips this section entirely.
+Do not generate an author's summary, rationale, or other context the user did not supply.
 
 For round 1, append:
 
 ```markdown
-## Review mode: full
+## Review task: staged changes
 
-Perform one comprehensive review of the uncommitted changeset. This is the only full-review round
-in this run.
+Review the staged changes (`git diff --cached`). Look for logical bugs and other concrete issues
+that should be fixed before commit. Assess the implementation's conventions and overall direction.
+You may also call out architectural decisions you disagree with, but categorize those as
+`architecture` rather than presenting preferences as defects.
 ```
 
-For round 2 and later, append a `## Review mode: verification` section followed by a
+For round 2 and later, append a `## Review task: fix verification` section followed by a
 `## Prior round` section built from the previous round's ledger entries:
 
 ```markdown
-## Review mode: verification
+## Review task: fix verification
 
-This is not a fresh full review. Review only:
+Focus on the unstaged fixes (`git diff`) and any new untracked files. Use the staged changes only
+as context. Check that the previous round's findings were addressed correctly.
 
-1. Whether each accepted or modified fix from the prior round is correct and complete.
-2. Whether each rejected finding's rebuttal is wrong.
-3. Concrete regressions introduced by the prior round's fixes.
-
-Do not search for unrelated new findings elsewhere in the cumulative diff. If you notice one
-outside this verification surface, omit it from this review.
+Report only an incorrect or incomplete fix, an incorrect rebuttal, or a regression introduced by
+the fixes. Do not conduct another general review of the staged changes.
 
 ## Prior round
 
@@ -152,7 +144,7 @@ Now:
   prior id and a direct counter-argument. If the rebuttal is right, drop it — do not re-report it.
 - For each **accepted** or **modified** finding: re-report only if the fix is wrong or incomplete.
 - For each **out-of-scope** or **deferred** finding: do not re-report it.
-- Report a genuinely new finding only when the prior round's fix introduced it.
+- Report a new finding only when the prior round's fix introduced it.
 ```
 
 ### 3. Run Codex
@@ -200,12 +192,8 @@ a process that then exits, so this session stays flat across rounds. Spawn a `ge
 with:
 
 - the path to `$RUN/round-$N.json` and `$RUN/ledger.json` (it reads them itself)
-- **an intent brief you write** — the `## Author's notes` material **plus the justifications you
-  withheld from Codex**, since the anchoring concern runs the other way here: the fixer is the
-  author's side of the argument and needs to know why each decision was made. Design reasoning,
-  rejected alternatives, constraints that don't show up in the diff. This is the one thing the
-  subagent cannot recover on its own and it decides whether triage is good or bad — don't skip it,
-  and don't pad it with what the code already says.
+- a short intent brief containing only the additional context the user supplied and any concrete
+  constraints already established in the session that are necessary to triage the findings
 - instructions to: verify each finding against the actual code first; apply accepted and modified
   fixes; never fix an issue Codex did not report; write `$RUN/dispositions-$N.json` as
   `{"round": N, "dispositions": [{"id","disposition","note"}], "follow_ups": [], "questions": []}`
