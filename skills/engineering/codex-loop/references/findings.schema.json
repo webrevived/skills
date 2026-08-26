@@ -6,7 +6,7 @@
     "verdict": {
       "type": "string",
       "enum": ["clean", "findings"],
-      "description": "\"clean\" when there is nothing worth reporting. An empty findings array is a valid and expected outcome."
+      "description": "\"clean\" when the reviewed changes require no action before commit. An empty findings array is a valid and expected outcome."
     },
     "summary": {
       "type": "string",
@@ -63,7 +63,7 @@
           },
           "body": {
             "type": "string",
-            "description": "The concrete failure: inputs or state that produce the wrong result, and what to do about it."
+            "description": "The concrete failure introduced or materially worsened by the reviewed changes: inputs or state that produce the wrong result, why it warrants action before commit, and what to do about it."
           },
           "repeat_of": {
             "type": "string",

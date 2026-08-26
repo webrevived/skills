@@ -1,6 +1,6 @@
 ---
 name: codex-loop
-description: Bounded Codex review loop — a pinned Codex reviewer checks staged changes, then performs focused verification of unstaged fixes with user-gated extensions. Only run when explicitly invoked via /codex-loop or $codex-loop.
+description: Bounded Codex review-and-fix loop — a pinned reviewer checks staged changes, then performs focused verification until findings are closed or genuinely separate work needs user attention. Only run when explicitly invoked via /codex-loop or $codex-loop.
 disable-model-invocation: true
 argument-hint: '[--here] [--rounds N] [optional review focus]'
 ---
@@ -109,9 +109,10 @@ For round 1, append:
 ## Review task: staged changes
 
 Review the staged changes (`git diff --cached`). Look for logical bugs and other concrete issues
-that should be fixed before commit. Assess the implementation's conventions and overall direction.
-You may also call out architectural decisions you disagree with, but categorize those as
-`architecture` rather than presenting preferences as defects.
+introduced or materially worsened by this changeset that should be fixed before committing this
+phase. Assess the implementation's conventions and overall direction. Report an architectural
+issue only when the current decision creates a material maintainability or scalability risk;
+categorize it as `architecture` and explain the tradeoff rather than presenting taste as a defect.
 ```
 
 For round 2 and later, append a `## Review task: fix verification` section followed by a
@@ -143,7 +144,8 @@ Now:
 - For each **rejected** finding: if the rebuttal is wrong, re-report it with `repeat_of` set to the
   prior id and a direct counter-argument. If the rebuttal is right, drop it — do not re-report it.
 - For each **accepted** or **modified** finding: re-report only if the fix is wrong or incomplete.
-- For each **out-of-scope** or **deferred** finding: do not re-report it.
+- For each **outside-review**, **separate-follow-up**, or **user-deferred** finding: do not re-report
+  it.
 - Report a new finding only when the prior round's fix introduced it.
 ```
 
@@ -179,13 +181,19 @@ jq -r '.verdict, .summary, (.findings[] | "\(.id) [\(.severity)/\(.category)] \(
 
 Every finding gets verified against the real code before anything is applied — Codex is wrong a
 meaningful fraction of the time. Each one ends as **accepted** (applied as described), **modified**
-(real problem, different fix), **rejected** (not a problem, or wrong), or **out-of-scope** (real,
-but pre-existing or belongs to work in flight that isn't this changeset's to fix), or **deferred**
-(real and in scope, but deliberately not fixed in this loop). Record out-of-scope and deferred
-findings in the ledger and final report.
+(real problem, different fix), **rejected** (not a problem, or wrong), **outside-review**
+(pre-existing and neither worsened nor relied upon by the changeset), **separate-follow-up** (real
+work that is not required to complete this staged phase and either was explicitly excluded by the
+user/plan or requires a materially separate feature, phase, or external dependency), or
+**user-deferred** (a verified in-scope finding the user explicitly chose not to fix in this run).
 
-A **blocking finding** is `critical` or `major` and categorized as `correctness` or `security`.
-Only an accepted or modified blocking finding can trigger another verification round after round 2.
+Default every real in-scope finding to **accepted** or **modified**. Do not use
+**separate-follow-up** merely because a fix is non-blocking, inconvenient, slightly beyond the
+originally edited lines, or larger than expected. Its note must say why the work cannot responsibly
+be completed in this loop and name the exact next action. The agent cannot choose
+**user-deferred** on the user's behalf. If scope or product intent is unclear, add a question and
+stop instead of manufacturing a deferral. Record every disposition in the ledger, but only
+separate follow-ups and explicit user deferrals count as still open.
 
 **Default — delegate to a subagent.** This is the point of the skill: the fix work burns context in
 a process that then exits, so this session stays flat across rounds. Spawn a `general-purpose` agent
@@ -196,10 +204,10 @@ with:
   constraints already established in the session that are necessary to triage the findings
 - instructions to: verify each finding against the actual code first; apply accepted and modified
   fixes; never fix an issue Codex did not report; write `$RUN/dispositions-$N.json` as
-  `{"round": N, "dispositions": [{"id","disposition","note"}], "follow_ups": [], "questions": []}`
-  where `disposition` is `accepted`/`modified`/`rejected`/`out-of-scope`/`deferred` and `note` is
-  one line; put other issues it notices in `follow_ups` without editing them; and return a short
-  report, not a narration.
+  `{"round": N, "dispositions": [{"id","disposition","note"}], "questions": []}` where
+  `disposition` is `accepted`/`modified`/`rejected`/`outside-review`/`separate-follow-up`/
+  `user-deferred` and `note` is one line; do not record incidental follow-ups Codex did not report;
+  and return a short report, not a narration.
 
 **The first line of the brief, verbatim: "Never `git add`, never `git commit`, never touch the
 index — fixes land in the working tree only."** Not buried mid-brief as context; a subagent has
@@ -222,13 +230,11 @@ the snapshot expected — do not attempt to repair the index yourself.
 
 ### 6. Continue or stop
 
-After round 1, continue to one verification round when at least one accepted or modified fix was
-applied.
-
-After round 2 or later, continue only when the round produced at least one accepted or modified
-**blocking finding**, its fix was applied, and no stop condition below fired. Minor findings and
-findings categorized as performance, test-coverage, maintainability, docs, architecture, or style
-never trigger another round; record them in the final report.
+After any round, continue to a targeted verification round when at least one accepted or modified
+fix was applied and no stop condition below fired. Severity and category do not waive verification:
+a real fix should be closed, not left open merely because it is non-blocking. Later rounds remain
+limited to prior findings and fix-induced regressions, so this does not authorize another general
+review of the staged changes.
 
 When continuing, advance state exactly once:
 
@@ -242,10 +248,8 @@ stop as soon as the continuation criteria fail.
 **Stop and hand to the user** when any of these fire:
 
 - **Clean** — `verdict: "clean"`. Done.
-- **Non-blocking** — after a verification round, no accepted or modified blocking finding remains.
-- **Taste** — every remaining finding is `architecture` or `style`. The disagreement is no longer
-  about defects; it's the reviewer and fixer expressing different preferences, and that's the
-  user's call.
+- **Resolved** — no accepted or modified fix needs verification and every reported finding has a
+  disposition. Rejected and outside-review findings are closed, not still open.
 - **Stalemate** — a finding is re-reported (`repeat_of` set) against a rejection you still believe
   is correct, and Codex's counter-argument raises nothing new. Present both positions and let the
   user settle it. Do not fold just because Codex repeated itself, and do not re-argue it a third
@@ -261,7 +265,7 @@ stop as soon as the continuation criteria fail.
 The automatic budget is not an absolute cap. When the guard blocks a justified next round:
 
 1. Stop before launching Codex.
-2. Show the accepted or modified blocking findings that require verification.
+2. Show the accepted or modified findings that require verification.
 3. State that another `gpt-5.6-sol`/`xhigh` round is expected to take roughly 10–15 minutes.
 4. Ask the user to approve one additional round.
 
@@ -279,11 +283,13 @@ mode. If the user declines, go to **Final report** with verification pending.
 
 Short. In this order:
 
-1. Why the loop ended (clean / non-blocking / taste / stalemate / thrash / budget declined /
-   question) and how many rounds ran.
+1. Why the loop ended (clean / resolved / stalemate / thrash / budget declined / question) and how
+   many rounds ran.
 2. A table across all rounds: finding, category, disposition, one-line reason.
-3. Anything still open — unresolved disagreements stated as both positions, out-of-scope findings
-   and deferred follow-ups, unverified fixes, and any question.
+3. **Still open**, only when there is at least one separate follow-up, explicit user deferral,
+   unresolved disagreement, unverified fix after a declined extension, or unanswered question. For
+   each item, state why it could not be completed in this loop and the exact next action. Do not
+   include rejected or outside-review findings. If nothing qualifies, say `No open review work.`
 4. The run directory path.
 
 State plainly that the loop did not alter the index and its fixes are sitting in the working tree.
