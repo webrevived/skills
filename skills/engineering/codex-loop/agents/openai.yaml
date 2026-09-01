@@ -1,7 +1,7 @@
 interface:
   display_name: "Codex Loop"
-  short_description: "Review staged changes and verify fixes with Codex"
-  default_prompt: "Use $codex-loop to review the staged changes and verify the fixes."
+  short_description: "Multi-agent staged review with bounded fix verification"
+  default_prompt: "Use $codex-loop at the default high level to review the staged changes, fix valid findings, and verify the fixes."
 
 policy:
   allow_implicit_invocation: false

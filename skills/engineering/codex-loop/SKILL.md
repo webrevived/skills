@@ -1,26 +1,35 @@
 ---
 name: codex-loop
-description: Bounded Codex review-and-fix loop — a pinned reviewer checks staged changes, then performs focused verification until findings are closed or genuinely separate work needs user attention. Only run when explicitly invoked via /codex-loop or $codex-loop.
+description: Bounded multi-agent Codex review-and-fix loop — specialized reviewers inspect staged changes, then focused verification closes the fixes or surfaces genuinely separate work. Only run when explicitly invoked via /codex-loop or $codex-loop.
 disable-model-invocation: true
-argument-hint: '[--here] [--rounds N] [optional review focus]'
+argument-hint: '[low|medium|high|xhigh] [--rounds N] [optional review focus]'
 ---
 
-Codex (`gpt-5.6-sol`, `xhigh`) reviews the staged changes, you triage and fix, the
-dispositions go back to Codex for bounded verification. This replaces the manual
-paste-between-tools loop without turning every round into another full review.
+Codex (`gpt-5.6-sol`) reviews the staged changes through level-appropriate independent review
+paths, you triage and fix, and the dispositions go back to Codex for bounded verification. The
+default `high` review uses broad multi-agent discovery without turning every later round into
+another full review.
 
-**Arguments** (all optional; free text after the flags is additional review context):
+**Arguments** (all optional; the level, when supplied, must be the first argument; remaining free
+text is additional review context):
 
-- `--here` — do the triage-and-fix in this session instead of delegating to a subagent
+- `low`, `medium`, `high`, or `xhigh` — review depth and reasoning effort; default `high`
 - `--rounds N` — automatic round budget, default `3`; this is not a target or an absolute ceiling
+
+Recognize a review level only in that first positional slot. Words such as `low` or `high` later in
+the review focus are ordinary context, not additional levels. Do not support `max` or remember the
+level from an earlier run. Reject unsupported flags wherever they appear. In particular, reject the
+removed `--here` flag and explain that fix delegation is now automatic when available.
 
 ## Ground rules
 
 - **Never `git add`, never commit.** The user reviews via the stage-vs-working-tree diff. Fixes
   land in the working tree only.
 - **Codex runs read-only** (`-s read-only`). It reviews; it does not edit.
-- Pin every review to `gpt-5.6-sol` at `xhigh` reasoning effort. Do not substitute another model or
-  inherit those two settings from local configuration.
+- Pin every review to `gpt-5.6-sol` and the selected reasoning effort. Do not substitute another
+  model or inherit either setting from local configuration.
+- Use the selected level's multi-agent protocol only for the initial staged review. Later rounds
+  are targeted fix verification regardless of level.
 - Run at most three rounds automatically unless the user explicitly supplied `--rounds N`.
   Additional rounds remain available, but require explicit user approval before each extension.
 - Follow the repository's data-handling rules. If they prohibit sending changed content to Codex,
@@ -54,6 +63,7 @@ Hosts install skills in different locations, so never hard-code `.claude/skills`
 
 ```bash
 test -f "$SKILL_DIR/references/review-prompt.md"
+test -f "$SKILL_DIR/references/initial-review-protocol.md"
 test -f "$SKILL_DIR/references/findings.schema.json"
 test -f "$SKILL_DIR/scripts/round-budget.sh"
 ```
@@ -65,6 +75,17 @@ does not require write access to `.git`:
 BRANCH="$(git branch --show-current | tr '/:' '--')"
 RUN="$(mktemp -d "${TMPDIR:-/tmp}/codex-loop-${BRANCH:-detached}-$(date +%Y%m%d-%H%M%S).XXXXXX")"
 git diff --cached | git hash-object --stdin > "$RUN/staged.sha"
+printf '{}\n' > "$RUN/ledger.json"
+```
+
+Resolve the level exclusively from the first argument before parsing flags. Consume it only when it
+is exactly `low`, `medium`, `high`, or `xhigh`; reject `max` in that slot. Otherwise default to
+`high` and preserve a non-flag first argument as review focus. Reject `--here` and any other
+unsupported flag wherever it appears. Record the result so every round uses the same model effort:
+
+```bash
+LEVEL=high # Replace with low, medium, high, or xhigh when explicitly supplied.
+printf '%s\n' "$LEVEL" > "$RUN/review-level"
 ```
 
 Initialize the automatic budget from `--rounds N`, or `3` when the flag was omitted. Reject
@@ -98,10 +119,16 @@ the state files to bypass the guard.
 
 ```bash
 cp "$SKILL_DIR/references/review-prompt.md" "$RUN/prompt-$N.md"
+LEVEL="$(cat "$RUN/review-level")"
+printf '\n## Review level\n\n%s\n\n' "$LEVEL" >> "$RUN/prompt-$N.md"
+
+if [[ "$N" == "1" ]]; then
+  cat "$SKILL_DIR/references/initial-review-protocol.md" >> "$RUN/prompt-$N.md"
+fi
 ```
 
-Append any review focus the user passed as arguments under a `## Additional focus` heading.
-Do not generate an author's summary, rationale, or other context the user did not supply.
+Append any review focus the user passed as arguments under a `## Additional focus` heading. Do not
+generate an author's summary, rationale, or other context the user did not supply.
 
 For round 1, append:
 
@@ -151,29 +178,57 @@ Now:
 
 ### 3. Run Codex
 
-Reviews at `xhigh` effort run **~10–15 minutes per round**. Set the Bash timeout to `600000` and
-tell the user when a round starts. Do not silently start an unapproved extension.
+Initial `high` and `xhigh` reviews fan out across multiple agents and can run for many minutes.
+Launch every Codex invocation with the host's background or asynchronous shell mode **on the first
+attempt**, retain its job/session handle, and tell the user the level and round when it starts. If
+the host instead provides a resumable exec or PTY session, use that and yield while it runs. Do not
+run Codex in a foreground tool call with a fixed long timeout: exceeding a wait limit must never
+kill a healthy review or force it to restart. Do not silently start an unapproved extension.
 
 ```bash
+# Launch this command with the host's background/async option immediately.
+LEVEL="$(cat "$RUN/review-level")"
 codex exec \
   -m gpt-5.6-sol \
-  -c 'model_reasoning_effort="xhigh"' \
+  -c "model_reasoning_effort=\"$LEVEL\"" \
   -s read-only \
   --output-schema "$SKILL_DIR/references/findings.schema.json" \
   -o "$RUN/round-$N.json" \
   - < "$RUN/prompt-$N.md" > "$RUN/round-$N.log" 2>&1
 ```
 
-Non-zero exit or a missing/unparseable `round-$N.json`: check the tail of the log, retry once, then
-stop and report.
+Wait for the retained job/session to complete using notifications or non-terminating polls. A poll
+or wait timing out means wait again; it is not a failed review. Never launch another invocation
+while the original job/session may still be running.
+
+Bound each attempt by elapsed wall-clock time from launch: `20` minutes for `low`, `30` for
+`medium`, `45` for `high`, and `60` for `xhigh`. Individual poll timeouts do not reset that
+watchdog. If the process is still alive at the overall deadline, capture its session/job status and
+the tail of `round-$N.log`, then cancel only that retained job/session: request a graceful interrupt
+first and terminate it only if it does not exit. Never identify the target by a broad process-name
+match. Wait until the cancelled process has definitely exited before treating the attempt as
+failed.
+
+After a definite non-zero exit, watchdog cancellation, or missing/unparseable `round-$N.json`,
+check the captured diagnostics and retry once as a new background job with a fresh watchdog. Stop
+and report if that retry fails.
 
 ### 4. Read only the headline into this session
 
 Keep the full finding bodies out of your context — the fixer reads the file directly.
 
 ```bash
-jq -r '.verdict, .summary, (.findings[] | "\(.id) [\(.severity)/\(.category)] \(.file):\(.line) — \(.title)\(if .repeat_of != "" then "  (repeat of \(.repeat_of))" else "" end)")' "$RUN/round-$N.json"
+jq -r '.verdict, .summary, (.findings[] | "\(.id) [\(.severity)/\(.category)/\(.validation)] \(.file):\(.line) — \(.title)\(if .repeat_of != "" then "  (repeat of \(.repeat_of))" else "" end)")' "$RUN/round-$N.json"
 ```
+
+Assert the index survived the read-only review before following any exit path:
+
+```bash
+test "$(git diff --cached | git hash-object --stdin)" = "$(cat "$RUN/staged.sha")" || echo "INDEX MUTATED"
+```
+
+If it differs, stop the loop immediately and show the user `git status --porcelain` next to what
+the snapshot expected — do not attempt to repair the index yourself.
 
 `verdict: "clean"` with no findings → the loop is done. Go to **Final report**.
 
@@ -195,9 +250,8 @@ be completed in this loop and name the exact next action. The agent cannot choos
 stop instead of manufacturing a deferral. Record every disposition in the ledger, but only
 separate follow-ups and explicit user deferrals count as still open.
 
-**Default — delegate to a subagent.** This is the point of the skill: the fix work burns context in
-a process that then exits, so this session stays flat across rounds. Spawn a `general-purpose` agent
-with:
+**Delegate to a subagent.** This is the point of the skill: the fix work burns context in a process
+that then exits, so this session stays flat across rounds. Spawn one capable coding subagent with:
 
 - the path to `$RUN/round-$N.json` and `$RUN/ledger.json` (it reads them itself)
 - a short intent brief containing only the additional context the user supplied and any concrete
@@ -213,13 +267,10 @@ with:
 index — fixes land in the working tree only."** Not buried mid-brief as context; a subagent has
 unstaged paths before when the rule lived in prose.
 
-**With `--here` — do it in this session.** Same verification-first standard. Use this when the
-findings turn on design intent that lives in this conversation, and accept that context grows.
+If subagent delegation is unavailable, perform the same verification-first triage in this session.
+Do not ask the user to choose between those execution details.
 
-If `questions` is non-empty, stop before another review. Ask the user and wait.
-
-Then merge the round's findings and dispositions into `$RUN/ledger.json`, keyed `R<N>-F<n>`, and
-assert the index survived the round:
+Immediately after the fixer returns, assert the index survived its work:
 
 ```bash
 test "$(git diff --cached | git hash-object --stdin)" = "$(cat "$RUN/staged.sha")" || echo "INDEX MUTATED"
@@ -227,6 +278,10 @@ test "$(git diff --cached | git hash-object --stdin)" = "$(cat "$RUN/staged.sha"
 
 If it differs, stop the loop immediately and show the user `git status --porcelain` next to what
 the snapshot expected — do not attempt to repair the index yourself.
+
+If `questions` is non-empty, stop before another review. Ask the user and wait.
+
+Then merge the round's findings and dispositions into `$RUN/ledger.json`, keyed `R<N>-F<n>`.
 
 ### 6. Continue or stop
 
@@ -266,7 +321,9 @@ The automatic budget is not an absolute cap. When the guard blocks a justified n
 
 1. Stop before launching Codex.
 2. Show the accepted or modified findings that require verification.
-3. State that another `gpt-5.6-sol`/`xhigh` round is expected to take roughly 10–15 minutes.
+3. State that another `gpt-5.6-sol` round will use the selected effort but remain targeted rather
+   than repeating initial fan-out. Use the most recent verification-round duration as the estimate
+   when available; otherwise do not invent one.
 4. Ask the user to approve one additional round.
 
 Only after explicit approval, extend the budget and return to **Enforce the budget**:
@@ -283,9 +340,9 @@ mode. If the user declines, go to **Final report** with verification pending.
 
 Short. In this order:
 
-1. Why the loop ended (clean / resolved / stalemate / thrash / budget declined / question) and how
-   many rounds ran.
-2. A table across all rounds: finding, category, disposition, one-line reason.
+1. The selected level, why the loop ended (clean / resolved / stalemate / thrash / budget declined
+   / question), and how many rounds ran.
+2. A table across all rounds: finding, category, validation, disposition, one-line reason.
 3. **Still open**, only when there is at least one separate follow-up, explicit user deferral,
    unresolved disagreement, unverified fix after a declined extension, or unanswered question. For
    each item, state why it could not be completed in this loop and the exact next action. Do not

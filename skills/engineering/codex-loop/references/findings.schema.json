@@ -24,6 +24,8 @@
           "line",
           "severity",
           "category",
+          "validation",
+          "failure_scenario",
           "body",
           "repeat_of"
         ],
@@ -61,9 +63,18 @@
               "docs"
             ]
           },
+          "validation": {
+            "type": "string",
+            "enum": ["confirmed", "plausible", "unverified"],
+            "description": "Candidate validation state. Use unverified only for low-level initial review or an explicitly degraded no-delegation fallback; targeted verification findings are confirmed or plausible."
+          },
+          "failure_scenario": {
+            "type": "string",
+            "description": "Concrete input, state, timing, platform, divergence risk, or operational cost that makes the issue material."
+          },
           "body": {
             "type": "string",
-            "description": "The concrete failure introduced or materially worsened by the reviewed changes: inputs or state that produce the wrong result, why it warrants action before commit, and what to do about it."
+            "description": "Evidence that the issue is introduced or materially worsened by the reviewed changes, why it warrants action before commit, and the required direction for the fix."
           },
           "repeat_of": {
             "type": "string",
