@@ -1,352 +1,171 @@
 ---
 name: codex-loop
-description: Bounded multi-agent Codex review-and-fix loop — specialized reviewers inspect staged changes, then focused verification closes the fixes or surfaces genuinely separate work. Only run when explicitly invoked via /codex-loop or $codex-loop.
+description: Use when explicitly invoked via /codex-loop or $codex-loop to review staged changes with Codex, fix valid findings, and run bounded verification.
 disable-model-invocation: true
-argument-hint: '[low|medium|high|xhigh] [--rounds N] [optional review focus]'
+argument-hint: '[low|medium|high|xhigh] [--model astra|sol] [--rounds N] [review focus]'
 ---
 
-Codex (`gpt-5.6-sol`) reviews the staged changes through level-appropriate independent review
-paths, you triage and fix, and the dispositions go back to Codex for bounded verification. The
-default `high` review uses broad multi-agent discovery without turning every later round into
-another full review.
+Run one independent staged review, triage and fix its findings, then verify only those fixes
+and rebuttals. Keep this session lean: pass artifact paths to fresh reviewers and fixers;
+read headlines and dispositions here, not full findings, diffs, or child transcripts.
 
-**Arguments** (all optional; the level, when supplied, must be the first argument; remaining free
-text is additional review context):
+## Arguments
 
-- `low`, `medium`, `high`, or `xhigh` — review depth and reasoning effort; default `high`
-- `--rounds N` — automatic round budget, default `3`; this is not a target or an absolute ceiling
+Resolve arguments afresh on every invocation:
 
-Recognize a review level only in that first positional slot. Words such as `low` or `high` later in
-the review focus are ordinary context, not additional levels. Do not support `max` or remember the
-level from an earlier run. Reject unsupported flags wherever they appear. In particular, reject the
-removed `--here` flag and explain that fix delegation is now automatic when available.
+- Recognize `low`, `medium`, `high`, or `xhigh` only as the very first argument, before parsing
+  flags; default `high`. This selects initial review depth and reasoning effort. Later level
+  words are review focus.
+- `--model astra|sol`: default `astra`. Map `astra` to `gpt-6-astra` and `sol` to `gpt-5.6-sol`.
+  Also accept those exact model IDs. Pin the selected model and effort for every review round;
+  reviewer children inherit them. This does not change the host session's model.
+- `--rounds N`: positive integer; default `3`. This is an automatic budget, not a target.
+- Remaining text: additional review focus supplied by the user.
 
-## Ground rules
+Reject missing/invalid flag values, duplicate flags, and unsupported flags anywhere. Reject
+`max` and `ultra` in the level slot: this skill defines only four review strategies. Reject
+the removed `--here` flag; fix delegation is automatic when available. Never silently fall
+back to another model if the selected one is unavailable.
 
-- **Never `git add`, never commit.** The user reviews via the stage-vs-working-tree diff. Fixes
-  land in the working tree only.
-- **Codex runs read-only** (`-s read-only`). It reviews; it does not edit.
-- Pin every review to `gpt-5.6-sol` and the selected reasoning effort. Do not substitute another
-  model or inherit either setting from local configuration.
-- Use the selected level's multi-agent protocol only for the initial staged review. Later rounds
-  are targeted fix verification regardless of level.
-- Run at most three rounds automatically unless the user explicitly supplied `--rounds N`.
-  Additional rounds remain available, but require explicit user approval before each extension.
-- Follow the repository's data-handling rules. If they prohibit sending changed content to Codex,
-  stop and tell the user.
+Examples: `$codex-loop`, `$codex-loop --model sol`,
+`$codex-loop xhigh --model astra --rounds 5 focus on authorization`.
 
-## Preflight
+## Preflight and invariants
 
-```bash
-git status --porcelain
-command -v codex
-git diff --cached --stat
-git diff --stat
-git ls-files --others --exclude-standard
-```
+1. Require `git`, `bash`, `jq`, and an authenticated `codex` CLI that supports the selected model.
+   Record `codex --version`; if the service requires a newer client, stop and report the upgrade
+   requirement. Follow repository data-handling rules; stop if they prohibit sending content to Codex.
+2. Work from the repository root. Inspect `git status --porcelain`, `git diff --cached --stat`,
+   `git diff --stat`, and `git ls-files --others --exclude-standard`.
+3. Require staged changes and no pre-existing unstaged or untracked files. Otherwise show the
+   blocking paths and ask the user to prepare the staged-only input. Do not stage, stash, delete,
+   or repair their files. Stop on Git errors rather than treating them as an empty diff.
+4. Resolve `SKILL_DIR` to the absolute directory containing this loaded `SKILL.md`; never assume
+   an installation location. Verify its referenced files exist.
 
-Require a staged-only starting state:
+**Never stage, commit, or touch the index.** Reviewers are read-only; fixes land only in the
+working tree. Do not run concurrent fixers or change branches during a run.
 
-- If `codex` is unavailable, stop and report the missing prerequisite.
-- If `git diff --cached --quiet` succeeds, stop — there are no staged changes to review.
-- If `git diff --quiet` fails, stop and show the pre-existing unstaged changes.
-- If `git ls-files --others --exclude-standard` returns any paths, stop and show the pre-existing
-  untracked files.
-
-Do not stage, stash, delete, or otherwise resolve those files. Ask the user to prepare the intended
-staged changes and invoke the skill again. This clean boundary means every later working-tree
-change belongs to the fixer while the index remains the immutable review baseline.
-
-Resolve the absolute directory containing this loaded `SKILL.md` and store it in `SKILL_DIR`.
-Hosts install skills in different locations, so never hard-code `.claude/skills`,
-`.agents/skills`, or a user-level skill directory. Verify the references before starting:
+Create artifacts outside the repository and persist the resolved settings:
 
 ```bash
-test -f "$SKILL_DIR/references/review-prompt.md"
-test -f "$SKILL_DIR/references/initial-review-protocol.md"
-test -f "$SKILL_DIR/references/findings.schema.json"
-test -f "$SKILL_DIR/scripts/round-budget.sh"
-```
-
-Create the run directory outside the repository so artifacts cannot be committed and the workflow
-does not require write access to `.git`:
-
-```bash
-BRANCH="$(git branch --show-current | tr '/:' '--')"
-RUN="$(mktemp -d "${TMPDIR:-/tmp}/codex-loop-${BRANCH:-detached}-$(date +%Y%m%d-%H%M%S).XXXXXX")"
-git diff --cached | git hash-object --stdin > "$RUN/staged.sha"
-printf '{}\n' > "$RUN/ledger.json"
-```
-
-Resolve the level exclusively from the first argument before parsing flags. Consume it only when it
-is exactly `low`, `medium`, `high`, or `xhigh`; reject `max` in that slot. Otherwise default to
-`high` and preserve a non-flag first argument as review focus. Reject `--here` and any other
-unsupported flag wherever it appears. Record the result so every round uses the same model effort:
-
-```bash
-LEVEL=high # Replace with low, medium, high, or xhigh when explicitly supplied.
+RUN="$(mktemp -d "${TMPDIR:-/tmp}/codex-loop.XXXXXX")"
+REPO="$(git rev-parse --show-toplevel)"
+MODEL=gpt-6-astra # Use gpt-5.6-sol when selected.
+LEVEL=high       # Use the selected review level.
+AUTOMATIC_BUDGET=3 # Use the validated --rounds value when supplied.
+printf '%s\n' "$REPO" > "$RUN/repo"
+printf '%s\n' "$MODEL" > "$RUN/model"
 printf '%s\n' "$LEVEL" > "$RUN/review-level"
-```
-
-Initialize the automatic budget from `--rounds N`, or `3` when the flag was omitted. Reject
-non-positive or non-integer values:
-
-```bash
-AUTOMATIC_BUDGET=3 # Replace 3 with the validated N when --rounds N was supplied.
+bash "$SKILL_DIR/scripts/baseline.sh" init "$RUN"
+printf '{}\n' > "$RUN/ledger.json"
 bash "$SKILL_DIR/scripts/round-budget.sh" init "$RUN" "$AUTOMATIC_BUDGET"
 ```
 
-The `staged.sha` snapshot is the index guard — after every round you assert the staged diff is
-byte-identical, because a subagent has mutated the index before despite instructions.
+Use literal file writes for user focus and briefs; do not interpolate user text into shell code.
+Report the run directory, selected model, level, and budget.
 
-Report the run directory to the user so they can inspect artifacts afterwards.
-
-## Round procedure
-
-### 1. Enforce the budget
-
-Read the round number from state and run the guard immediately before every Codex invocation:
+**Baseline check:** after each reviewer attempt (including failures), after the fixer, and before
+returning to the user, run:
 
 ```bash
-N="$(bash "$SKILL_DIR/scripts/round-budget.sh" current "$RUN")"
-bash "$SKILL_DIR/scripts/round-budget.sh" guard "$RUN"
+bash "$SKILL_DIR/scripts/baseline.sh" check "$RUN"
 ```
 
-If the guard exits non-zero, do not launch Codex. Go to **Budget gate**. Never reset or recreate
-the state files to bypass the guard.
+The helper compares HEAD and compact staged-diff metadata, ignoring index cache metadata and unstaged fixes.
+Skip a duplicate check if no work or waiting occurred since the last successful check. On failure,
+stop with its diagnostics; never repair or recreate the baseline. Do not load the helper source
+into context unless diagnosing a failure.
 
-### 2. Compose the prompt
+## Each round
+
+### 1. Review
+
+Read [references/execution.md](references/execution.md) once for prompt assembly, background
+execution, output validation, and retry rules. Reuse that procedure every round.
+
+- Round 1: send the common review prompt and initial-review protocol directly to Codex.
+- Later rounds: send the common prompt and verification protocol, plus paths to the previous
+  findings and dispositions. Do not append the initial fan-out protocol or the full ledger.
+- Start a fresh `codex exec` per round; do not resume a growing review transcript.
+
+After successful output validation and the baseline check, read only the headline:
 
 ```bash
-cp "$SKILL_DIR/references/review-prompt.md" "$RUN/prompt-$N.md"
-LEVEL="$(cat "$RUN/review-level")"
-printf '\n## Review level\n\n%s\n\n' "$LEVEL" >> "$RUN/prompt-$N.md"
-
-if [[ "$N" == "1" ]]; then
-  cat "$SKILL_DIR/references/initial-review-protocol.md" >> "$RUN/prompt-$N.md"
-fi
+jq -r '.verdict, .summary, (.findings[] | "\(.id) [\(.severity)/\(.category)/\(.validation)] \(.file):\(.line) — \(.title)\(if .repeat_of != "" then " (repeat of \(.repeat_of))" else "" end)")' "$RUN/round-$N.json"
 ```
 
-Append any review focus the user passed as arguments under a `## Additional focus` heading. Do not
-generate an author's summary, rationale, or other context the user did not supply.
+A clean verification closes the pending fixes from the previous round; it does not erase older
+follow-ups or user deferrals. On any successful verification, close prior accepted/modified
+findings that were not re-reported; link repeats to their prior ledger entries and resolve each
+repeat chain using its latest disposition instead of leaving superseded entries pending. Record
+this before handling new findings or stopping. A clean initial review needs no fixer.
 
-For round 1, append:
+### 2. Triage and fix
 
-```markdown
-## Review task: staged changes
+For nonempty findings, delegate to one fresh coding subagent without inherited conversation
+history when supported. Its first instruction must be:
 
-Review the staged changes (`git diff --cached`). Look for logical bugs and other concrete issues
-introduced or materially worsened by this changeset that should be fixed before committing this
-phase. Assess the implementation's conventions and overall direction. Report an architectural
-issue only when the current decision creates a material maintainability or scalability risk;
-categorize it as `architecture` and explain the tradeoff rather than presenting taste as a defect.
-```
+> Never `git add`, never `git commit`, never touch the index — fixes land in the working tree only.
 
-For round 2 and later, append a `## Review task: fix verification` section followed by a
-`## Prior round` section built from the previous round's ledger entries:
+Give it the repository path, round number, `$RUN/round-$N.json`, `$RUN/ledger.json`, the output
+path `$RUN/dispositions-$N.json`, and [references/fixer.md](references/fixer.md). Include only
+user-supplied intent and established constraints needed to judge the findings. The fixer reads
+the full findings itself and returns a short disposition/test summary. It must read repository
+instructions for affected files. If delegation is unavailable, read that reference and perform
+the same work here; do not ask the user to choose the mechanism.
 
-```markdown
-## Review task: fix verification
+Check the baseline when it returns. Require exactly one disposition per reported finding, or
+an explicit unresolved question for that ID, with no missing, duplicate, or invented IDs. Merge
+findings and dispositions into `ledger.json` under `R<N>-F<n>` keys before honoring questions or
+another stop condition. Preserve prior entries and `repeat_of` links; track applied fixes as
+verification-pending until a later review closes them. Do not copy full finding bodies into
+this session to maintain the ledger.
 
-Focus on the unstaged fixes (`git diff`) and any new untracked files. Use the staged changes only
-as context. Check that the previous round's findings were addressed correctly.
+### 3. Continue or stop
 
-Report only an incorrect or incomplete fix, an incorrect rebuttal, or a regression introduced by
-the fixes. Do not conduct another general review of the staged changes.
+- **Clean:** no findings in a valid review result. Stop after recording closures.
+- **Resolved:** every finding has a disposition and no applied fix needs verification. Rejected
+  and outside-review findings are closed; separate follow-ups and user deferrals stay open.
+- **Question:** a fix needs user intent or the fixer returned questions. Preserve completed work
+  and ask before another review.
+- **Stalemate:** a repeated finding challenges a rejection with no new evidence, and the fixer
+  still rejects it. Present both positions; do not argue it a third time.
+- **Thrash:** the same invariant has been patched in three consecutive rounds and each patch
+  caused the next finding. Stop further patching and surface the design decision.
 
-## Prior round
-
-The diff already contains the accepted fixes. Here is what happened to each finding:
-
-### R<N-1>-F1 — <title> (<file>:<line>) — ACCEPTED
-
-<what was actually changed>
-
-### R<N-1>-F2 — <title> (<file>:<line>) — REJECTED
-
-<the rebuttal>
-
-Now:
-
-- For each **rejected** finding: if the rebuttal is wrong, re-report it with `repeat_of` set to the
-  prior id and a direct counter-argument. If the rebuttal is right, drop it — do not re-report it.
-- For each **accepted** or **modified** finding: re-report only if the fix is wrong or incomplete.
-- For each **outside-review**, **separate-follow-up**, or **user-deferred** finding: do not re-report
-  it.
-- Report a new finding only when the prior round's fix introduced it.
-```
-
-### 3. Run Codex
-
-Initial `high` and `xhigh` reviews fan out across multiple agents and can run for many minutes.
-Launch every Codex invocation with the host's background or asynchronous shell mode **on the first
-attempt**, retain its job/session handle, and tell the user the level and round when it starts. If
-the host instead provides a resumable exec or PTY session, use that and yield while it runs. Do not
-run Codex in a foreground tool call with a fixed long timeout: exceeding a wait limit must never
-kill a healthy review or force it to restart. Do not silently start an unapproved extension.
-
-```bash
-# Launch this command with the host's background/async option immediately.
-LEVEL="$(cat "$RUN/review-level")"
-codex exec \
-  -m gpt-5.6-sol \
-  -c "model_reasoning_effort=\"$LEVEL\"" \
-  -s read-only \
-  --output-schema "$SKILL_DIR/references/findings.schema.json" \
-  -o "$RUN/round-$N.json" \
-  - < "$RUN/prompt-$N.md" > "$RUN/round-$N.log" 2>&1
-```
-
-Wait for the retained job/session to complete using notifications or non-terminating polls. A poll
-or wait timing out means wait again; it is not a failed review. Never launch another invocation
-while the original job/session may still be running.
-
-Bound each attempt by elapsed wall-clock time from launch: `20` minutes for `low`, `30` for
-`medium`, `45` for `high`, and `60` for `xhigh`. Individual poll timeouts do not reset that
-watchdog. If the process is still alive at the overall deadline, capture its session/job status and
-the tail of `round-$N.log`, then cancel only that retained job/session: request a graceful interrupt
-first and terminate it only if it does not exit. Never identify the target by a broad process-name
-match. Wait until the cancelled process has definitely exited before treating the attempt as
-failed.
-
-After a definite non-zero exit, watchdog cancellation, or missing/unparseable `round-$N.json`,
-check the captured diagnostics and retry once as a new background job with a fresh watchdog. Stop
-and report if that retry fails.
-
-### 4. Read only the headline into this session
-
-Keep the full finding bodies out of your context — the fixer reads the file directly.
-
-```bash
-jq -r '.verdict, .summary, (.findings[] | "\(.id) [\(.severity)/\(.category)/\(.validation)] \(.file):\(.line) — \(.title)\(if .repeat_of != "" then "  (repeat of \(.repeat_of))" else "" end)")' "$RUN/round-$N.json"
-```
-
-Assert the index survived the read-only review before following any exit path:
-
-```bash
-test "$(git diff --cached | git hash-object --stdin)" = "$(cat "$RUN/staged.sha")" || echo "INDEX MUTATED"
-```
-
-If it differs, stop the loop immediately and show the user `git status --porcelain` next to what
-the snapshot expected — do not attempt to repair the index yourself.
-
-`verdict: "clean"` with no findings → the loop is done. Go to **Final report**.
-
-### 5. Triage and fix
-
-Every finding gets verified against the real code before anything is applied — Codex is wrong a
-meaningful fraction of the time. Each one ends as **accepted** (applied as described), **modified**
-(real problem, different fix), **rejected** (not a problem, or wrong), **outside-review**
-(pre-existing and neither worsened nor relied upon by the changeset), **separate-follow-up** (real
-work that is not required to complete this staged phase and either was explicitly excluded by the
-user/plan or requires a materially separate feature, phase, or external dependency), or
-**user-deferred** (a verified in-scope finding the user explicitly chose not to fix in this run).
-
-Default every real in-scope finding to **accepted** or **modified**. Do not use
-**separate-follow-up** merely because a fix is non-blocking, inconvenient, slightly beyond the
-originally edited lines, or larger than expected. Its note must say why the work cannot responsibly
-be completed in this loop and name the exact next action. The agent cannot choose
-**user-deferred** on the user's behalf. If scope or product intent is unclear, add a question and
-stop instead of manufacturing a deferral. Record every disposition in the ledger, but only
-separate follow-ups and explicit user deferrals count as still open.
-
-**Delegate to a subagent.** This is the point of the skill: the fix work burns context in a process
-that then exits, so this session stays flat across rounds. Spawn one capable coding subagent with:
-
-- the path to `$RUN/round-$N.json` and `$RUN/ledger.json` (it reads them itself)
-- a short intent brief containing only the additional context the user supplied and any concrete
-  constraints already established in the session that are necessary to triage the findings
-- instructions to: verify each finding against the actual code first; apply accepted and modified
-  fixes; never fix an issue Codex did not report; write `$RUN/dispositions-$N.json` as
-  `{"round": N, "dispositions": [{"id","disposition","note"}], "questions": []}` where
-  `disposition` is `accepted`/`modified`/`rejected`/`outside-review`/`separate-follow-up`/
-  `user-deferred` and `note` is one line; do not record incidental follow-ups Codex did not report;
-  and return a short report, not a narration.
-
-**The first line of the brief, verbatim: "Never `git add`, never `git commit`, never touch the
-index — fixes land in the working tree only."** Not buried mid-brief as context; a subagent has
-unstaged paths before when the rule lived in prose.
-
-If subagent delegation is unavailable, perform the same verification-first triage in this session.
-Do not ask the user to choose between those execution details.
-
-Immediately after the fixer returns, assert the index survived its work:
-
-```bash
-test "$(git diff --cached | git hash-object --stdin)" = "$(cat "$RUN/staged.sha")" || echo "INDEX MUTATED"
-```
-
-If it differs, stop the loop immediately and show the user `git status --porcelain` next to what
-the snapshot expected — do not attempt to repair the index yourself.
-
-If `questions` is non-empty, stop before another review. Ask the user and wait.
-
-Then merge the round's findings and dispositions into `$RUN/ledger.json`, keyed `R<N>-F<n>`.
-
-### 6. Continue or stop
-
-After any round, continue to a targeted verification round when at least one accepted or modified
-fix was applied and no stop condition below fired. Severity and category do not waive verification:
-a real fix should be closed, not left open merely because it is non-blocking. Later rounds remain
-limited to prior findings and fix-induced regressions, so this does not authorize another general
-review of the staged changes.
-
-When continuing, advance state exactly once:
+Otherwise, when an accepted/modified fix was applied, advance exactly once and run targeted
+verification regardless of severity:
 
 ```bash
 bash "$SKILL_DIR/scripts/round-budget.sh" advance "$RUN"
 ```
 
-Return to **Enforce the budget**. A budget is permission to run up to that many rounds, not a target:
-stop as soon as the continuation criteria fail.
-
-**Stop and hand to the user** when any of these fire:
-
-- **Clean** — `verdict: "clean"`. Done.
-- **Resolved** — no accepted or modified fix needs verification and every reported finding has a
-  disposition. Rejected and outside-review findings are closed, not still open.
-- **Stalemate** — a finding is re-reported (`repeat_of` set) against a rejection you still believe
-  is correct, and Codex's counter-argument raises nothing new. Present both positions and let the
-  user settle it. Do not fold just because Codex repeated itself, and do not re-argue it a third
-  time.
-- **Thrash** — the same file or invariant has been patched in three consecutive rounds, each fix
-  spawning the next round's finding. Stop patching: the defect is in the design, at a level
-  point-fixes can't reach. Name the pattern and put the underlying design question to the user.
-- **Open question** — the subagent returned `questions`, or a fix needs a decision only the user can
-  make. Ask before continuing; a wrong assumption compounds across rounds.
+A round with only rejected/outside-review findings can resolve without another call; do not
+claim those decisions were independently verified. If review execution fails, stop with any
+applied fixes still verification-pending.
 
 ## Budget gate
 
-The automatic budget is not an absolute cap. When the guard blocks a justified next round:
-
-1. Stop before launching Codex.
-2. Show the accepted or modified findings that require verification.
-3. State that another `gpt-5.6-sol` round will use the selected effort but remain targeted rather
-   than repeating initial fan-out. Use the most recent verification-round duration as the estimate
-   when available; otherwise do not invent one.
-4. Ask the user to approve one additional round.
-
-Only after explicit approval, extend the budget and return to **Enforce the budget**:
+When the execution guard blocks a needed round, show the fixes awaiting verification and ask
+for one additional round using the saved model and effort. Explain that this skill requires
+explicit approval beyond the automatic budget. Use an observed verification duration if
+available; do not invent an estimate. Only after approval:
 
 ```bash
 bash "$SKILL_DIR/scripts/round-budget.sh" extend "$RUN" 1
 ```
 
-If the user explicitly approves more than one additional round, extend by exactly that number.
-Never infer approval from the desire to finish, never reset the state, and never restart full-review
-mode. If the user declines, go to **Final report** with verification pending.
+Extend by exactly the approved count if the user explicitly grants more. Never reset/recreate
+state or infer an extension from the desire to finish. Declining leaves verification pending.
 
 ## Final report
 
-Short. In this order:
+Report the model, requested level and any degraded coverage, completed rounds, and stop reason.
+Give a compact table of findings, validation, disposition, and one-line reasons across rounds.
+List still-open work only for separate follow-ups, explicit user deferrals, unresolved questions
+or disagreements, and pending verification; give each an exact next action. Otherwise say
+`No open review work.` Include tests/check limitations and the run directory.
 
-1. The selected level, why the loop ended (clean / resolved / stalemate / thrash / budget declined
-   / question), and how many rounds ran.
-2. A table across all rounds: finding, category, validation, disposition, one-line reason.
-3. **Still open**, only when there is at least one separate follow-up, explicit user deferral,
-   unresolved disagreement, unverified fix after a declined extension, or unanswered question. For
-   each item, state why it could not be completed in this loop and the exact next action. Do not
-   include rejected or outside-review findings. If nothing qualifies, say `No open review work.`
-4. The run directory path.
-
-State plainly that the loop did not alter the index and its fixes are sitting in the working tree.
+State whether the baseline checks passed and that fixes remain unstaged. Never claim the index
+was preserved or the review was clean after a failed check, invalid result, or incomplete run.

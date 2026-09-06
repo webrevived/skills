@@ -1,6 +1,6 @@
 # Code review
 
-Follow the `## Review task` appended to this prompt. Read the surrounding code, `AGENTS.md`, and
+Follow the `Review task` appended to this prompt. Read the surrounding code, `AGENTS.md`, and
 relevant repository documentation as needed to verify each finding.
 
 Report only concrete issues introduced or materially worsened by the reviewed changes that should

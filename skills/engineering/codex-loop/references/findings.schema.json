@@ -32,6 +32,7 @@
         "properties": {
           "id": {
             "type": "string",
+            "pattern": "^F[1-9][0-9]*$",
             "description": "Stable short id within this round, e.g. \"F1\"."
           },
           "title": {
@@ -44,6 +45,7 @@
           },
           "line": {
             "type": "integer",
+            "minimum": 1,
             "description": "1-indexed line the finding anchors to."
           },
           "severity": {

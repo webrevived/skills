@@ -1,4 +1,4 @@
-# Initial staged-review protocol
+# Review task: staged changes
 
 Review `git diff --cached` using the strategy named under `## Review level`. The staged diff is the
 complete review boundary. Read surrounding code and repository instructions when they materially
@@ -28,6 +28,8 @@ the finder count, use waves. Give each finder a fresh role-specific brief; do no
 simulate several independent reviewers unless the selected level explicitly combines perspectives.
 Use a fresh context without inherited reviewer conclusions when the delegation tool supports it.
 Do not override a child agent's model or reasoning effort; inherit them from this reviewer.
+Close completed children after collecting their results so later waves can reuse the available
+agent slots. Retain concise candidate evidence, not transcripts or repeated copies of the diff.
 
 If subagent delegation is unavailable, explicitly downgrade the initial review to `low` semantics
 regardless of the requested level. Perform one single-context pass, do not claim independent finder
