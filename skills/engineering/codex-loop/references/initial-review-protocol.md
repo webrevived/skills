@@ -23,9 +23,13 @@ Every finder is read-only. Give each finder this scope and one assigned perspect
   cost scenario, and supporting evidence. Return no candidate when the perspective finds nothing.
 - Do not edit, stage, commit, stash, or delete files.
 
-Launch independent finders concurrently when the host permits. When concurrency is smaller than
-the finder count, use waves. Give each finder a fresh role-specific brief; do not ask one finder to
-simulate several independent reviewers unless the selected level explicitly combines perspectives.
+The host allows at most 12 open child agents at once. Launch finders concurrently within that
+limit and run verifiers in waves of at most 12. A spawn failure reporting a thread limit means a
+wave is still open, not that delegation is unavailable: close finished children, then relaunch
+the failed spawns. Never downgrade the review because of a thread-limit failure.
+
+Give each finder a fresh role-specific brief; do not ask one finder to simulate several
+independent reviewers unless the selected level explicitly combines perspectives.
 Use a fresh context without inherited reviewer conclusions when the delegation tool supports it.
 Do not override a child agent's model or reasoning effort; inherit them from this reviewer.
 Close completed children after collecting their results so later waves can reuse the available

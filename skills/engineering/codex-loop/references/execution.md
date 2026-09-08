@@ -40,11 +40,20 @@ Announce the model, level, and round. Do not use a foreground call whose timeout
 ```bash
 codex exec -C "$REPO" \
   -m "$MODEL" -c "model_reasoning_effort=\"$LEVEL\"" \
+  -c agents.max_concurrent_threads_per_session=12 \
   -s read-only \
   --output-schema "$SKILL_DIR/references/findings.schema.json" \
   -o "$RUN/round-$N.json" \
   - < "$RUN/prompt-$N.md" > "$RUN/round-$N.log" 2>&1
 ```
+
+The `agents.max_concurrent_threads_per_session` override is required. Codex defaults to only a
+few concurrent child threads per session (3 under multi-agent v2, 6 under v1), which is below the
+finder wave the `high` and `xhigh` protocols launch. Without it the reviewer's spawns fail with
+`agent thread limit reached`, and the reviewer wrongly falls back to the degraded single-pass
+result. The value counts child threads only; closing a child frees its slot, so 12 covers the
+largest finder wave and verifiers run in waves of 12. Do not pass `agents.max_threads`: it is a
+legacy alias of the same key, not a separate lifetime cap.
 
 Poll the same job non-destructively. A wait timeout means wait again, never start another job.
 Keep the user informed during long runs without dumping logs. Bound each attempt by elapsed time
@@ -61,7 +70,11 @@ and these semantic checks:
 - `clean` iff findings are empty; `findings` iff nonempty.
 - IDs are unique `F1`, `F2`, etc.; lines are positive integers.
 - Round 1: findings have empty `repeat_of`; enforce the initial protocol's level-specific
-  finding caps and validation rules, including any declared no-delegation downgrade.
+  finding caps and validation rules. Accept a declared no-delegation downgrade only when the
+  requested level is `low` or the log shows delegation is genuinely unavailable.
+- `grep -c 'agent thread limit reached' "$RUN/round-$N.log"` must be zero. A hit means the
+  reviewer exceeded the configured concurrency: the result is invalid even if it validates,
+  because its coverage is not what the level promised.
 - Later rounds: nonempty `repeat_of` references identify an actual prior finding, and validation
   is `confirmed` or `plausible` regardless of level. Initial finding caps do not apply.
 
