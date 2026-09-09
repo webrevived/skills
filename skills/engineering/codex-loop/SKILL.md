@@ -14,11 +14,13 @@ read headlines and dispositions here, not full findings, diffs, or child transcr
 Resolve arguments afresh on every invocation:
 
 - Recognize `low`, `medium`, `high`, or `xhigh` only as the very first argument, before parsing
-  flags; default `high`. This selects initial review depth and reasoning effort. Later level
-  words are review focus.
+  flags; default `high`. This selects initial review breadth: how many finder perspectives run
+  and how many findings the report may carry. It never lowers reasoning depth; every level runs
+  the root reviewer at `high` effort and every finder, verifier, and sweep child at `xhigh`.
+  Later level words are review focus.
 - `--model astra|sol`: default `astra`. Map `astra` to `gpt-6-astra` and `sol` to `gpt-5.6-sol`.
-  Also accept those exact model IDs. Pin the selected model and effort for every review round;
-  reviewer children inherit them. This does not change the host session's model.
+  Also accept those exact model IDs. Pin the selected model for every review round; reviewer
+  children inherit it. This does not change the host session's model.
 - `--rounds N`: positive integer; default `3`. This is an automatic budget, not a target.
 - Remaining text: additional review focus supplied by the user.
 
@@ -52,7 +54,7 @@ Create artifacts outside the repository and persist the resolved settings:
 RUN="$(mktemp -d "${TMPDIR:-/tmp}/codex-loop.XXXXXX")"
 REPO="$(git rev-parse --show-toplevel)"
 MODEL=gpt-6-astra # Use gpt-5.6-sol when selected.
-LEVEL=high       # Use the selected review level.
+LEVEL=high       # Use the selected review level (breadth only; effort is pinned in execution.md).
 AUTOMATIC_BUDGET=3 # Use the validated --rounds value when supplied.
 printf '%s\n' "$REPO" > "$RUN/repo"
 printf '%s\n' "$MODEL" > "$RUN/model"
@@ -161,8 +163,10 @@ state or infer an extension from the desire to finish. Declining leaves verifica
 
 ## Final report
 
-Report the model, requested level and any degraded coverage, the verified child-thread count
-from round 1 (or that it could not be verified), completed rounds, and stop reason.
+Report the model, requested level and any degraded coverage, the round-1 delegation line from
+the helper (child count, full-diff readers, child effort, or that it could not be verified),
+completed rounds, and stop reason. A clean verdict is reportable as clean only when that line met
+the floors in `references/execution.md`.
 Give a compact table of findings, validation, disposition, and one-line reasons across rounds.
 List still-open work only for separate follow-ups, explicit user deferrals, unresolved questions
 or disagreements, and pending verification; give each an exact next action. Otherwise say
