@@ -41,6 +41,7 @@ Announce the model, level, and round. Do not use a foreground call whose timeout
 codex exec -C "$REPO" \
   -m "$MODEL" -c "model_reasoning_effort=\"$LEVEL\"" \
   -c agents.max_concurrent_threads_per_session=12 \
+  -c features.memories=false \
   -s read-only \
   --output-schema "$SKILL_DIR/references/findings.schema.json" \
   -o "$RUN/round-$N.json" \
@@ -54,6 +55,11 @@ finder wave the `high` and `xhigh` protocols launch. Without it the reviewer's s
 result. The value counts child threads only; closing a child frees its slot, so 12 covers the
 largest finder wave and verifiers run in waves of 12. Do not pass `agents.max_threads`: it is a
 legacy alias of the same key, not a separate lifetime cap.
+
+The `features.memories=false` override is required. Codex memories are cross-project notes from
+the user's other sessions; a reviewer that reads them inherits prior conclusions and other
+repositories' context into an independent review, and the memory index alone costs tens of
+thousands of tokens per attempt. The review must rest on the staged diff and the repository.
 
 Poll the same job non-destructively. A wait timeout means wait again, never start another job.
 Keep the user informed during long runs without dumping logs. Bound each attempt by elapsed time
@@ -70,8 +76,25 @@ and these semantic checks:
 - `clean` iff findings are empty; `findings` iff nonempty.
 - IDs are unique `F1`, `F2`, etc.; lines are positive integers.
 - Round 1: findings have empty `repeat_of`; enforce the initial protocol's level-specific
-  finding caps and validation rules. Accept a declared no-delegation downgrade only when the
-  requested level is `low` or the log shows delegation is genuinely unavailable.
+  finding caps and validation rules.
+- Round 1 at `medium`, `high`, or `xhigh`: verify delegation with the helper, never with the log.
+  The exec log and its `--json` stream print only the root agent's commands, messages, and stderr
+  errors; they never show `spawn_agent`, `wait_agent`, or child activity, so an absence of finder
+  or verifier traces in the log is not evidence of anything. Run:
+
+  ```bash
+  bash "$SKILL_DIR/scripts/delegation-check.sh" "$RUN" "$N"
+  ```
+
+  It counts the child threads Codex recorded for the attempt's session. Require `depth1` of at
+  least 4 for `medium`, 8 for `high`, or 11 for `xhigh` (ten finders plus the gap sweep), plus
+  one per reported finding for its verifier. Finders that return no candidates need no
+  verifiers, so a `clean` result with exactly the finder count is valid. Exit 2 means the sessions directory is unavailable: do not
+  reject on delegation grounds, and state in the final report that delegation was unverified.
+  A count below the requirement is an undeclared downgrade and invalidates the result, unless the
+  summary declares the downgrade and the log shows delegation is genuinely unavailable (the spawn
+  tool missing or every spawn failing). A single `collab spawn failed` error line while the child
+  count is satisfied is transient child-side noise, not a delegation failure.
 - `grep -c 'agent thread limit reached' "$RUN/round-$N.log"` must be zero. A hit means the
   reviewer exceeded the configured concurrency: the result is invalid even if it validates,
   because its coverage is not what the level promised.

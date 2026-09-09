@@ -161,7 +161,8 @@ state or infer an extension from the desire to finish. Declining leaves verifica
 
 ## Final report
 
-Report the model, requested level and any degraded coverage, completed rounds, and stop reason.
+Report the model, requested level and any degraded coverage, the verified child-thread count
+from round 1 (or that it could not be verified), completed rounds, and stop reason.
 Give a compact table of findings, validation, disposition, and one-line reasons across rounds.
 List still-open work only for separate follow-ups, explicit user deferrals, unresolved questions
 or disagreements, and pending verification; give each an exact next action. Otherwise say
