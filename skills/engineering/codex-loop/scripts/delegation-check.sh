@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Counts the child agent threads a `codex exec` review session actually spawned and measures
-# how deeply each one worked.
+# Counts all descendant agent threads of a `codex exec` review session and reports read hints
+# and recorded reasoning effort. Read hints are not proof of coverage.
 #
 # The human-readable `codex exec` log and its `--json` stream never print `spawn_agent`
 # calls, so the only durable evidence of delegation is the child rollout files Codex writes
 # under `$CODEX_HOME/sessions`. Each child rollout starts with a `session_meta` line whose
 # `source.subagent.thread_spawn.parent_thread_id` names the parent session.
 #
-# usage: delegation-check.sh RUN_DIR ROUND [LOG_PATH]
+# usage: delegation-check.sh RUN_DIR ROUND [LOG_PATH [SESSIONS_DIR]]
 #
 # stdout: `delegation: session=<id> children=<n> depth1=<n> full_diff=<n> effort=<summary>`
-#         followed by one `<depth> <agent_path> calls=<n> secs=<n> diff=<yes|no> effort=<e>`
-#         line per child. `full_diff` counts children whose commands read the complete staged
-#         diff (a `git diff --cached` without `--stat`/`--name-only`/`--check`, or the run's
-#         `staged.diff` file). `effort` summarises the reasoning effort every child ran at.
+#         followed by one `<depth> <agent_path> calls=<n> secs=<n> diff=<yes|no> effort=<e> rollout=<path>`
+#         line per descendant, with depth relative to the reviewer. `full_diff` counts matching
+#         command-text hints, which can miss valid reads or match mere mentions of staged.diff.
+#         `effort` includes every recorded turn, so later effort overrides remain visible.
 # exit 0: counted (children may be zero)
 # exit 1: usage or the log has no session id
 # exit 2: sessions directory unavailable; delegation is unknown, not absent
@@ -25,7 +25,7 @@ fail() {
   exit 1
 }
 
-[[ $# == 2 || $# == 3 ]] || fail "usage: delegation-check.sh RUN_DIR ROUND [LOG_PATH]"
+[[ $# -ge 2 && $# -le 4 ]] || fail "usage: delegation-check.sh RUN_DIR ROUND [LOG_PATH [SESSIONS_DIR]]"
 
 run_dir="$1"
 round="$2"
@@ -39,7 +39,7 @@ command -v jq > /dev/null || fail "jq is required"
 session_id="$(sed -n 's/^session id: \([0-9a-fA-F-]*\)$/\1/p' "$log_path" | head -n 1)"
 [[ -n "$session_id" ]] || fail "no session id header in $log_path"
 
-sessions_dir="${CODEX_HOME:-$HOME/.codex}/sessions"
+sessions_dir="${4:-${CODEX_HOME:-$HOME/.codex}/sessions}"
 if [[ ! -d "$sessions_dir" ]]; then
   echo "delegation-check: sessions directory unavailable: $sessions_dir" >&2
   echo "delegation: session=$session_id children=unknown depth1=unknown full_diff=unknown effort=unknown"
@@ -61,7 +61,7 @@ child_calls() {
     | gsub("[\r\n]+"; " ")' "$1" 2>/dev/null || true
 }
 
-# Whether the child read the complete staged diff rather than only its shape.
+# A read hint only; execution.md describes how to resolve ambiguous flags from actual outputs.
 read_full_diff() {
   local calls="$1"
   grep -q -F 'staged.diff' <<< "$calls" && return 0
@@ -77,23 +77,48 @@ child_seconds() {
 }
 
 child_effort() {
-  jq -r 'select(.type == "turn_context") | .payload.effort // empty' "$1" 2>/dev/null | head -n 1
+  jq -r 'select(.type == "turn_context") | .payload.effort // "unknown"' "$1" 2>/dev/null \
+    | sort -u | paste -sd, -
 }
+
+# Read metadata once per rollout, then follow parent IDs transitively. Filtering only for the
+# reviewer's ID would omit grandchildren whose immediate parent is a finder or verifier.
+metadata_file="$(mktemp "$run_dir/delegation-meta.XXXXXX")"
+descendants_file="$(mktemp "$run_dir/delegation-descendants.XXXXXX")"
+trap 'rm -f -- "$metadata_file" "$descendants_file"' EXIT
+while IFS= read -r -d '' rollout; do
+  metadata=""
+  IFS= read -r metadata < "$rollout" || true
+  [[ "$metadata" == *thread_spawn* ]] || continue
+  jq -c --arg file "$rollout" '
+    .payload as $p
+    | ($p.source | objects | .subagent.thread_spawn | objects) as $spawn
+    | select(($p.id // $p.session_id) != null and $spawn.parent_thread_id != null)
+    | {id: ($p.id // $p.session_id), parent: $spawn.parent_thread_id,
+       agent_path: $spawn.agent_path, file: $file}' <<< "$metadata" >> "$metadata_file" 2>/dev/null || continue
+done < <(find "$sessions_dir" -type f -name 'rollout-*.jsonl' "${find_args[@]}" -print0)
+
+jq -js --arg sid "$session_id" '
+  group_by(.parent) | map({key: .[0].parent, value: .}) | from_entries as $children
+  | def descendants($id; $seen; $depth):
+      ($children[$id] // [])[]
+      | select(.id as $child | $seen | index($child) | not)
+      | .depth = $depth
+      | ., descendants(.id; $seen + [.id]; $depth + 1);
+    descendants($sid; [$sid]; 1)
+    | [.file, (.depth | tostring), .agent_path][] | ., "\u0000"' "$metadata_file" > "$descendants_file"
 
 children=0
 depth1=0
 full_diff=0
 lines=()
 efforts=()
-while IFS= read -r -d '' rollout; do
-  grep -q -F "\"parent_thread_id\":\"$session_id\"" "$rollout" || continue
-  child="$(head -n 1 "$rollout" | jq -r --arg sid "$session_id" '
-    (.payload.source.subagent.thread_spawn // empty)
-    | select(.parent_thread_id == $sid)
-    | "\(.depth) \(.agent_path)"' 2>/dev/null || true)"
-  [[ -n "$child" ]] || continue
+while IFS= read -r -d '' rollout &&
+      IFS= read -r -d '' depth &&
+      IFS= read -r -d '' agent_path; do
+  child="$depth $agent_path"
   children=$((children + 1))
-  [[ "$child" == 1\ * ]] && depth1=$((depth1 + 1))
+  [[ "$depth" == 1 ]] && depth1=$((depth1 + 1))
 
   calls="$(child_calls "$rollout")"
   call_count=0
@@ -106,12 +131,12 @@ while IFS= read -r -d '' rollout; do
   effort="$(child_effort "$rollout")"
   [[ -n "$effort" ]] || effort=unknown
   efforts+=("$effort")
-  lines+=("$child calls=$call_count secs=$(child_seconds "$rollout") diff=$diff_flag effort=$effort")
-done < <(find "$sessions_dir" -type f -name 'rollout-*.jsonl' "${find_args[@]}" -print0)
+  lines+=("$child calls=$call_count secs=$(child_seconds "$rollout") diff=$diff_flag effort=$effort rollout=$rollout")
+done < "$descendants_file"
 
 effort_summary=none
 if (( ${#efforts[@]} > 0 )); then
-  effort_summary="$(printf '%s\n' "${efforts[@]}" | sort -u | paste -sd, -)"
+  effort_summary="$(printf '%s\n' "${efforts[@]}" | tr ',' '\n' | sort -u | paste -sd, -)"
 fi
 
 echo "delegation: session=$session_id children=$children depth1=$depth1 full_diff=$full_diff effort=$effort_summary"

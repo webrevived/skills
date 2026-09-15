@@ -1,16 +1,32 @@
 {
   "type": "object",
   "additionalProperties": false,
-  "required": ["verdict", "summary", "findings"],
+  "required": ["verdict", "summary", "findings", "unchecked_candidates"],
   "properties": {
     "verdict": {
       "type": "string",
-      "enum": ["clean", "findings"],
-      "description": "\"clean\" when the reviewed changes require no action before commit. An empty findings array is a valid and expected outcome."
+      "enum": ["clean", "findings", "incomplete"],
+      "description": "Use incomplete when unchecked_candidates is nonempty, even if findings is empty. Otherwise use findings for nonempty findings, or clean for empty findings."
     },
     "summary": {
       "type": "string",
       "description": "Two sentences at most, describing the state of the changeset overall."
+    },
+    "unchecked_candidates": {
+      "type": "array",
+      "description": "Initial-review candidates excluded by a cap or left without a verifier verdict. Empty for a complete initial review, intentional low-level review, and targeted verification rounds. Preserve enough detail for a separate follow-up.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "file", "line", "summary", "reason"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^C[1-9][0-9]*$" },
+          "file": { "type": "string", "description": "Repo-relative path." },
+          "line": { "type": "integer", "minimum": 1 },
+          "summary": { "type": "string", "description": "Candidate claim and concrete failure or cost scenario." },
+          "reason": { "type": "string", "enum": ["candidate_cap", "verification_incomplete"] }
+        }
+      }
     },
     "findings": {
       "type": "array",

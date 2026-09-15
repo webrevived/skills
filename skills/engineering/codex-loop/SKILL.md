@@ -14,10 +14,10 @@ read headlines and dispositions here, not full findings, diffs, or child transcr
 Resolve arguments afresh on every invocation:
 
 - Recognize `low`, `medium`, `high`, or `xhigh` only as the very first argument, before parsing
-  flags; default `high`. This selects initial review breadth: how many finder perspectives run
-  and how many findings the report may carry. It never lowers reasoning depth; every level runs
-  the root reviewer at `high` effort and every finder, verifier, and sweep child at `xhigh`.
-  Later level words are review focus.
+  flags; default `high`. This selects initial review breadth and reasoning effort: the root
+  reviewer and its children run at the selected level in every round. `medium` uses four
+  grouped finders; `high` uses eight specialists; `xhigh` uses ten plus a gap sweep. Candidate
+  verification uses small independent batches. Later level words are review focus.
 - `--model astra|sol`: default `astra`. Map `astra` to `gpt-6-astra` and `sol` to `gpt-5.6-sol`.
   Also accept those exact model IDs. Pin the selected model for every review round; reviewer
   children inherit it. This does not change the host session's model.
@@ -54,7 +54,7 @@ Create artifacts outside the repository and persist the resolved settings:
 RUN="$(mktemp -d "${TMPDIR:-/tmp}/codex-loop.XXXXXX")"
 REPO="$(git rev-parse --show-toplevel)"
 MODEL=gpt-6-astra # Use gpt-5.6-sol when selected.
-LEVEL=high       # Use the selected review level (breadth only; effort is pinned in execution.md).
+LEVEL=high       # Use the selected review level for both breadth and reasoning effort.
 AUTOMATIC_BUDGET=3 # Use the validated --rounds value when supplied.
 printf '%s\n' "$REPO" > "$RUN/repo"
 printf '%s\n' "$MODEL" > "$RUN/model"
@@ -65,7 +65,7 @@ bash "$SKILL_DIR/scripts/round-budget.sh" init "$RUN" "$AUTOMATIC_BUDGET"
 ```
 
 Use literal file writes for user focus and briefs; do not interpolate user text into shell code.
-Report the run directory, selected model, level, and budget.
+Report the run directory, selected model, level/effort, and round budget.
 
 **Baseline check:** after each reviewer attempt (including failures), after the fixer, and before
 returning to the user, run:
@@ -97,10 +97,15 @@ After successful output validation and the baseline check, read only the headlin
 jq -r '.verdict, .summary, (.findings[] | "\(.id) [\(.severity)/\(.category)/\(.validation)] \(.file):\(.line) — \(.title)\(if .repeat_of != "" then " (repeat of \(.repeat_of))" else "" end)")' "$RUN/round-$N.json"
 ```
 
+After round 1, save `.unchecked_candidates` to `$RUN/unchecked-candidates.json`. Preserve this
+file across targeted rounds; their empty candidate lists do not clear initial coverage gaps.
+An `incomplete` result is usable for triaging its verified findings, but cannot establish clean
+initial coverage. Do not launch another general review to consume the omitted candidates.
+
 A clean verification closes the pending fixes from the previous round; it does not erase older
-follow-ups or user deferrals. On any successful verification, close prior accepted/modified
-findings that were not re-reported; link repeats to their prior ledger entries and resolve each
-repeat chain using its latest disposition instead of leaving superseded entries pending. Record
+follow-ups, user deferrals, or unchecked initial candidates. On any successful verification, close
+prior accepted/modified findings that were not re-reported; link repeats to their prior ledger
+entries and resolve each repeat chain using its latest disposition instead of leaving superseded entries pending. Record
 this before handling new findings or stopping. A clean initial review needs no fixer.
 
 ### 2. Triage and fix
@@ -126,7 +131,10 @@ this session to maintain the ledger.
 
 ### 3. Continue or stop
 
-- **Clean:** no findings in a valid review result. Stop after recording closures.
+- **Incomplete:** initial candidates remain unchecked and no applied fix awaits verification.
+  Stop with the saved candidates and their reasons as open work. If fixes still need verification,
+  run the usual targeted round first; it cannot close this separate coverage gap.
+- **Clean:** no findings or unchecked initial candidates in a valid review result. Stop after recording closures.
 - **Resolved:** every finding has a disposition and no applied fix needs verification. Rejected
   and outside-review findings are closed; separate follow-ups and user deferrals stay open.
 - **Question:** a fix needs user intent or the fixer returned questions. Preserve completed work
@@ -164,12 +172,13 @@ state or infer an extension from the desire to finish. Declining leaves verifica
 ## Final report
 
 Report the model, requested level and any degraded coverage, the round-1 delegation line from
-the helper (child count, full-diff readers, child effort, or that it could not be verified),
-completed rounds, and stop reason. A clean verdict is reportable as clean only when that line met
-the floors in `references/execution.md`.
+the helper (child count, diff-read hints, recorded effort, or that it could not be verified),
+completed rounds, and stop reason. Apply the coverage and effort checks, including the unavailable
+telemetry exception, in `references/execution.md` before reporting a clean verdict.
 Give a compact table of findings, validation, disposition, and one-line reasons across rounds.
 List still-open work only for separate follow-ups, explicit user deferrals, unresolved questions
-or disagreements, and pending verification; give each an exact next action. Otherwise say
+or disagreements, pending verification, and incomplete initial coverage; give each an exact next
+action. Carry unchecked initial candidates forward even after a clean targeted round. Otherwise say
 `No open review work.` Include tests/check limitations and the run directory.
 
 State whether the baseline checks passed and that fixes remain unstaged. Never claim the index

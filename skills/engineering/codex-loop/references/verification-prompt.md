@@ -14,7 +14,8 @@ Set `repeat_of` to `R<prior-round>-F<n>` for a repeated finding. Set `validation
 when repository evidence proves it or `plausible` when a material runtime/product assumption
 remains. No new independent verifier fan-out is required in these targeted rounds.
 
-Return `clean` with no findings when fixes and rebuttals need no further action. State any
-checks you could not perform in the summary; do not imply tests ran when they did not.
+Always return `unchecked_candidates: []`: initial coverage gaps are retained separately by the
+host and are outside this targeted round. Return `clean` with no findings when fixes and rebuttals
+need no further action. State any checks you could not perform in the summary; do not imply tests ran when they did not.
 Reuse recorded check results when they still apply to the current code. Re-run checks only to
 resolve a concrete evidence gap or suspected regression; always inspect the fix independently.

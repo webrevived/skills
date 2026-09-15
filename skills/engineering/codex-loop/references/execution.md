@@ -8,6 +8,10 @@ never launch anyway.
 REPO="$(cat "$RUN/repo")"
 MODEL="$(cat "$RUN/model")"
 LEVEL="$(cat "$RUN/review-level")"
+case "$LEVEL" in
+  low|medium|high|xhigh) EFFORT="$LEVEL" ;;
+  *) printf 'Invalid saved review level: %s\n' "$LEVEL" >&2; exit 1 ;;
+esac
 N="$(bash "$SKILL_DIR/scripts/round-budget.sh" current "$RUN")"
 bash "$SKILL_DIR/scripts/round-budget.sh" guard "$RUN"
 ```
@@ -38,12 +42,12 @@ summary or rationale; the root reviewer writes its own neutral description from 
 
 Launch with the host's background/asynchronous shell facility **on the first attempt**, or a
 resumable exec/PTY that yields without killing the process. Retain its handle and launch time.
-Announce the model, level, and round. Do not use a foreground call whose timeout kills the job.
+Announce the model, level/effort, and round. Do not use a foreground call whose timeout kills the job.
 
 ```bash
 codex exec -C "$REPO" \
-  -m "$MODEL" -c 'model_reasoning_effort="high"' \
-  -c 'agents.default_subagent_reasoning_effort="xhigh"' \
+  -m "$MODEL" -c "model_reasoning_effort=\"$EFFORT\"" \
+  -c "agents.default_subagent_reasoning_effort=\"$EFFORT\"" \
   -c agents.max_concurrent_threads_per_session=12 \
   -c memories.use_memories=false \
   -s read-only \
@@ -52,21 +56,20 @@ codex exec -C "$REPO" \
   - < "$RUN/prompt-$N.md" > "$RUN/round-$N.log" 2>&1
 ```
 
-Reasoning effort is pinned and does not follow the review level. The level controls breadth
-(finder count and finding caps); depth is always root `high` and children `xhigh`. Passing the
-level as the root effort was the main cause of false-clean reviews: finders inherited `medium`,
-skimmed the diff in under a minute each, and returned nothing for verifiers to check.
-
-`agents.default_subagent_reasoning_effort` sets the effort every spawned finder, verifier, and
-sweep agent runs at. Do not lower it for cost.
+Use the selected effort for both the root reviewer and every finder, verifier, and sweep child.
+Set both flags explicitly rather than relying on inheritance. This applies to targeted rounds
+as well as the initial review. Full-diff reads, surrounding-code checks, and a separate evidence
+verdict for every candidate remain required at `medium` and above; a lower effort is not permission
+to skim or silently omit verification. Do not automatically escalate effort on a retry.
 
 The `agents.max_concurrent_threads_per_session` override is required. Codex defaults to only a
 few concurrent child threads per session (3 under multi-agent v2, 6 under v1), which is below the
 finder wave the protocols launch. Without it the reviewer's spawns fail with
 `agent thread limit reached`, and the reviewer wrongly falls back to the degraded single-pass
 result. The value counts child threads only; closing a child frees its slot, so 12 covers the
-largest finder wave and verifiers run in waves of 12. Do not pass `agents.max_threads`: it is a
-legacy alias of the same key, not a separate lifetime cap.
+largest finder wave. Collect and close each phase before launching the next. Do not pass
+`agents.max_threads`: it is a legacy alias of the same key, not a separate lifetime cap. The initial
+protocol separately bounds total children; increasing concurrency must not expand that budget.
 
 `memories.use_memories=false` is required. Codex memories are cross-project notes from the user's
 other sessions; a reviewer that reads them inherits prior conclusions and other repositories'
@@ -85,7 +88,9 @@ After every attempt exits, perform the baseline check from `SKILL.md` even on fa
 immediately on baseline drift. Accept output only after exit zero, valid schema-shaped JSON,
 and these semantic checks:
 
-- `clean` iff findings are empty; `findings` iff nonempty.
+- `incomplete` iff `unchecked_candidates` is nonempty. Otherwise `clean` iff findings are empty,
+  and `findings` iff nonempty. Unchecked candidate IDs must be unique `C1`, `C2`, etc., with valid
+  locations and reasons. A legitimate incomplete result is not a process failure or retry trigger.
 - IDs are unique `F1`, `F2`, etc.; lines are positive integers.
 - Round 1: findings have empty `repeat_of`; enforce the initial protocol's level-specific
   finding caps and validation rules.
@@ -98,22 +103,41 @@ and these semantic checks:
   bash "$SKILL_DIR/scripts/delegation-check.sh" "$RUN" "$N"
   ```
 
-  It counts the child threads Codex recorded for the attempt's session and, per child, its tool
-  calls, wall-clock seconds, and whether it read the full staged diff. Require:
+  It counts all descendant threads Codex recorded for the attempt's session and, per descendant,
+  its tool calls, wall-clock seconds, read hints, and recorded efforts. Compare the role names in
+  its output with the coverage counts in the result summary, using the initial protocol's limits:
 
-  - `depth1` of at least 9 for `medium` (eight finders plus the gap sweep) or 11 for `high` and
-    `xhigh` (ten finders plus the gap sweep), plus one per shortlisted candidate for its
-    verifier. Finders that return no candidates need no verifiers, so a `clean` result with
-    exactly the finder-plus-sweep count is valid.
-  - `full_diff` at least equal to the same floor. A child that never read the full diff (only
-    `--stat`, `--name-only`, or greps) did not perform its perspective. Fewer full-diff readers
-    than finders means at least one finder skimmed, and the result is invalid.
-  - `effort` reported as `xhigh` for every child. Anything else means the host override did not
-    apply; stop and report the client behavior rather than accepting the result.
+  - Exactly 4 finders for `medium`, 8 for `high`, or 10 plus `gap_sweep` for `xhigh`. No sweep
+    at lower levels. Require these roles individually; extra verifiers cannot replace finders.
+  - Add the reported batch and dedicated verifier counts, not one child per candidate. Each
+    batch covers 1–6 candidates, each dedicated verifier covers one, and at most two dedicated
+    verifiers may run across the initial pass and sweep combined. Cross-check initial and sweep
+    candidate counts against those capacities; require zero verifiers when no candidates exist.
+    Check the per-role batch caps and total child ceilings in the initial protocol. For example,
+    `high` with 24 assigned candidates and no dedicated verifiers needs 8 finders and 4 batch
+    verifiers, for 12 children. A clean no-candidate `high` review needs only the 8 finders.
+  - All children must be direct children (`children == depth1`); nested delegation bypasses the
+    budget. A verifier count or aggregate child count alone does not prove every candidate got
+    a verdict. If coverage counts are missing or inconsistent, inspect the relevant child
+    rollouts for assignments and verdicts before accepting the result.
+  - Every completed reviewer must read the full diff, but `diff=yes/no` is only a command-text
+    heuristic. It can miss valid reads such as `git -C ... diff --cached`, and a command mentioning
+    `staged.diff` may only count lines. Before accepting coverage, inspect each child's read commands
+    and completion/truncation markers at the helper's `rollout` path. Read only those records,
+    without loading diffs or whole transcripts. Resolve ambiguous reads from the actual outputs;
+    do not accept, reject, or retry solely on the flag. A failed verifier's assigned
+    candidates must be reported as unchecked rather than silently treated as reviewed.
+  - The effort recorded across all turns of every child must match the saved `$EFFORT`
+    (`medium`, `high`, or `xhigh`). A mismatch means the selected effort was not preserved;
+    stop and report the observed efforts.
+
+  Require `verdict: incomplete` when candidates remain unchecked because a cap was reached or a
+  batch could not finish. Preserve the candidate list before triaging any verified findings. Do
+  not retry solely to work around a cap or to hide an incomplete batch.
 
   Exit 2 means the sessions directory is unavailable: do not reject on delegation grounds, and
   state in the final report that delegation and depth were unverified.
-  A count below the requirement is an undeclared downgrade and invalidates the result, unless the
+  A count outside the protocol's requirements invalidates the result, unless the
   summary declares the downgrade and the log shows delegation is genuinely unavailable (the spawn
   tool missing or every spawn failing). A single `collab spawn failed` error line while the child
   count is satisfied is transient child-side noise, not a delegation failure.
@@ -121,7 +145,8 @@ and these semantic checks:
   reviewer exceeded the configured concurrency: the result is invalid even if it validates,
   because its coverage is not what the level promised.
 - Later rounds: nonempty `repeat_of` references identify an actual prior finding, and validation
-  is `confirmed` or `plausible` regardless of level. Initial finding caps do not apply.
+  is `confirmed` or `plausible` regardless of level. Initial finding caps do not apply. Require
+  `unchecked_candidates: []`; the saved initial list remains open regardless of this round's verdict.
 
 The CLI schema constrains structure; still reject truncated, contradictory, or malformed output.
 A failed review is never a clean result. For a definite process failure or invalid output,

@@ -11,14 +11,15 @@ when they materially affect a candidate, but do not turn this into a repository-
    description of what the change does and list the changed files. Do not speculate about the
    author's intent beyond what the diff and its doc changes state.
 2. Give each finder a brief containing: the repository path, the diff file path, your neutral
-   description, its single assigned perspective, and two to four diff-specific pointers for that
+   description, its assigned perspective or group, and two to four diff-specific pointers for that
    perspective (which hunks, symbols, deleted blocks, or comments deserve its attention). Briefs
    must differ by perspective; do not send the same brief with the perspective name swapped.
-3. Launch finders, collect candidates, deduplicate, verify, run the gap sweep, then report.
+3. Launch finders, collect candidates, deduplicate, verify in batches, then report. Run the gap
+   sweep only at `xhigh`.
 
 ## Shared finder contract
 
-Every finder is read-only and recall-biased. Give each finder this scope and one perspective:
+Every finder is read-only and recall-biased. Give each finder this scope and its assigned perspective(s):
 
 - Read the full diff from the diff file, then read the enclosing function or block for every hunk
   in the repository. Bugs in unchanged lines of a touched function are in scope.
@@ -41,14 +42,16 @@ Every finder is read-only and recall-biased. Give each finder this scope and one
 - Do not edit, stage, commit, stash, or delete files.
 
 The host allows at most 12 open child agents at once. Launch finders concurrently within that
-limit and run verifiers in waves of at most 12. A spawn failure reporting a thread limit means a
-wave is still open, not that delegation is unavailable: close finished children, then relaunch
-the failed spawns. Never downgrade the review because of a thread-limit failure.
+limit; collect and close them before launching verifiers. A spawn failure reporting a thread
+limit means a wave is still open, not that delegation is unavailable: close finished children,
+then relaunch the failed spawns. Never downgrade the review because of a thread-limit failure.
 
 Use a fresh context without inherited reviewer conclusions when the delegation tool supports it.
 Do not override a child agent's model or reasoning effort; the host configures them. Close
 completed children after collecting their results so later waves can reuse the available agent
 slots. Retain concise candidate evidence, not transcripts or repeated copies of the diff.
+Name children by role: `finder_1`, `finder_2`, etc., `verify_batch_1`, etc., `verify_dedicated_1`,
+`verify_dedicated_2`, `gap_sweep`, and `verify_sweep_1`/`verify_sweep_2`. Children must not delegate.
 
 If subagent delegation is unavailable, explicitly downgrade the initial review to `low` semantics
 regardless of the requested level. Perform one single-context pass, do not claim independent finder
@@ -92,8 +95,19 @@ degraded coverage in the result summary.
 
 ## Levels
 
-The level selects breadth: finder count, candidate caps, and the final finding cap. Reasoning
-depth is fixed by the host and does not change with the level.
+The host sets the root and child reasoning effort to the selected level. Keep the same evidence
+standard at every level; reduce breadth and repeated context loading for smaller reviews.
+
+| Level | Finders | Initial candidate cap | Batch verifiers, up to 6 candidates each | Gap sweep | Report cap |
+| --- | ---: | ---: | ---: | --- | ---: |
+| low | 0 | — | 0 | No | 4 |
+| medium | 4 grouped | 18 | Up to 3 | No | 8 |
+| high | 8 | 24 | Up to 4 | No | 10 |
+| xhigh | 10 | 22 | Up to 4 | Up to 8 candidates, up to 2 batch verifiers | 15 |
+
+Across the entire initial review, allow at most two additional dedicated verifiers for complex
+candidates, as described below. Child ceilings are therefore 9 for `medium`, 14 for `high`, and
+19 for `xhigh`; without dedicated verifiers they are 7, 12, and 17. These are ceilings, not targets.
 
 ### low
 
@@ -104,18 +118,25 @@ history or repository exploration. Do not run independent candidate verification
 
 ### medium
 
-Run finders 1 through 8, each returning at most 6 candidates. Deduplicate, verify every
-shortlisted candidate, run the gap sweep, and return at most 8 findings.
+Run four finders, each returning at most 6 candidates across its assigned group:
+
+1. Correctness and removed behavior: perspectives 1 and 2.
+2. Contracts and architecture: perspectives 3 and 7.
+3. Reuse and simplification: perspectives 4 and 5.
+4. Efficiency, conventions, docs, and tests: perspectives 6 and 8.
+
+Deduplicate, verify every shortlisted candidate in batches, and return at most 8 findings.
+Do not run a gap sweep.
 
 ### high
 
-Run finders 1 through 10, each returning at most 6 candidates. Deduplicate, verify every
-shortlisted candidate, run the gap sweep, and return at most 10 findings.
+Run finders 1 through 8, each returning at most 6 candidates. Deduplicate, verify every
+shortlisted candidate in batches, and return at most 10 findings. Do not run a gap sweep.
 
 ### xhigh
 
 Run finders 1 through 10, each returning at most 8 candidates. Deduplicate, verify every
-shortlisted candidate, run the gap sweep with its larger allowance, and return at most 15 findings.
+shortlisted candidate in batches, run the gap sweep, and return at most 15 findings.
 
 ## Deduplication
 
@@ -128,15 +149,30 @@ carry no failure or cost scenario at all. Do not drop a candidate for being unce
 weakly evidenced; that judgment belongs to the verifier.
 
 Rank the remaining candidates by severity, strength of repository evidence, concreteness of the
-failure scenario, and likely affected surface. Shortlist at most 20 candidates for `medium`, 24
-for `high`, or 30 for `xhigh`. The shortlist is a ceiling, not a target.
+failure scenario, and likely affected surface. Apply the table's initial candidate cap. At
+`xhigh`, reserve another 8 candidate slots for the sweep, keeping a global cap of 30. Assign stable
+`C1`, `C2`, etc. IDs before shortlisting; retain them through batching and the sweep. Put candidates
+excluded by the cap in `unchecked_candidates` with their location, failure scenario, and reason
+`candidate_cap`. Remove an entry only if that candidate subsequently receives a verifier verdict.
 
 ## Independent verification
 
-For `medium`, `high`, and `xhigh`, launch one fresh skeptic verifier per shortlisted candidate, in
-parallel waves when necessary. Give the verifier the candidate, the diff file path, and the
-repository location, but not a preferred verdict or finder identity. The verifier must inspect
-the actual diff and surrounding code and return exactly one verdict with a short reason:
+For `medium`, `high`, and `xhigh`, partition the shortlist into disjoint batches of at most six
+candidates. Group by related code to share necessary context, while judging every candidate
+separately. Use the fewest batches that fit, within the table's limit; do not pad empty batches.
+Launch one fresh skeptic verifier per batch. It must not have participated in discovery.
+
+Give each verifier candidate IDs and evidence, the diff file path, and the repository location,
+but not a preferred verdict, finder identity, or other verifiers' conclusions. Require it to
+read the full diff once, inspect the relevant surrounding code, and return exactly one verdict
+with evidence per assigned ID. One refutation must not dispose of a different candidate.
+
+When a candidate needs unusually extensive tracing or reproduction (for example a concurrency
+race or an authorization boundary), assign it alone to a dedicated verifier and remove it from
+the batches. Allow at most two dedicated verifiers total, including the sweep. Record the reason
+for isolation. Use the selected effort; do not silently raise it to `xhigh`.
+
+Use these verdicts for both batch and dedicated verification:
 
 - `CONFIRMED` — can name the inputs or state that trigger it and the wrong output, cost, or
   contradiction. Quote the line.
@@ -151,19 +187,34 @@ Default to `PLAUSIBLE` when the state is realistic. Do not refute a candidate fo
 speculative when the code does not exclude the trigger. Refute only with evidence constructible
 from the code.
 
-Drop `REFUTED` candidates. Set `validation` to `confirmed` or `plausible` for the others.
+Require a verdict and evidence for every assigned ID, with no missing, duplicate, or invented
+IDs. Check completeness before closing the verifier. Ask the same verifier to finish an incomplete
+batch; do not spawn replacement agents to bypass the budget. Put any candidate still missing a
+verdict in `unchecked_candidates` with reason `verification_incomplete`; do not silently drop it or
+infer a refutation. Drop `REFUTED` candidates. Set `validation` to `confirmed` or `plausible` for
+the others.
 
 ## Gap sweep
 
-After verification, launch one fresh finder with the deduplicated verified list. It must re-read
-the diff and enclosing code looking only for defects not already listed, especially: dropped
+At `xhigh` only, after verification, launch one fresh finder with the deduplicated verified list.
+It must re-read the diff and enclosing code looking only for defects not already listed: dropped
 guards in moved code, default-value changes, nondeterminism, narrowed locking, side-effecting
 predicates, asymmetric test setup and teardown, configuration-default flips, and stale comments,
-docs, or assertions the first pass missed. It returns up to 6 additional candidates at `medium`
-and `high`, or up to 8 at `xhigh`, or an empty sweep. Pass each through the same deduplication
-and independent verification before reporting.
+docs, or assertions the first pass missed. It returns up to 8 additional candidates, or an empty
+sweep. Deduplicate against all earlier candidates, including refuted ones; revisit a refutation
+only with new evidence. Verify new candidates in at most two fresh batches using the same rules.
+Any dedicated sweep verifier counts toward the run's existing two-verifier allowance.
 
 ## Final ranking
 
 Rank confirmed before plausible, then by severity and concreteness. Apply the selected level's
 final finding cap only after verification. Never invent extra findings to fill the cap.
+Set `verdict: incomplete` whenever `unchecked_candidates` is nonempty, even when every checked
+candidate was refuted. Otherwise use `findings` or `clean` according to whether findings remain.
+Use an empty `unchecked_candidates` array for `low`; its lack of independent verification is
+intentional and already represented by `validation: unverified`.
+
+In the result summary, include the counts of finders, initial candidates assigned to verifiers,
+initial verifier batches, dedicated verifiers, sweep candidates assigned, sweep batches, and
+candidates checked. Keep detailed completed verdicts internal; the host uses these counts and the
+unchecked candidate list to check coverage against child telemetry.
