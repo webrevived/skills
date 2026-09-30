@@ -1,0 +1,7 @@
+interface:
+  display_name: "Figma Component"
+  short_description: "Implement Figma components with design judgement"
+  default_prompt: "Use $figma-component to implement this Figma component."
+
+policy:
+  allow_implicit_invocation: false
