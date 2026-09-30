@@ -29,7 +29,7 @@ your home directory instead. `npx skills update` pulls the latest versions.
 | Skill | Category | What it does | Invoke |
 | ----- | -------- | ------------ | ------ |
 | [codex-loop](./skills/engineering/codex-loop/SKILL.md) | Engineering | Reviews staged changes with Astra using level-scaled effort and batched skeptic verification, fixes findings, then verifies; use `--model sol` for Sol. | Claude Code/Cursor: `/codex-loop`; Codex: `$codex-loop` |
-| [figma-component](./skills/design/figma-component/SKILL.md) | Design | Implements a component from Figma with judgement: maps raw values to tokens, fills missing states, and flags design mistakes instead of copying them. | Claude Code/Cursor: `/figma-component`; Codex: `$figma-component` |
+| [figma-build](./skills/design/figma-build/SKILL.md) | Design | Implements a component or page from Figma with judgement: maps raw values to tokens, fills missing states, and asks about unbuilt features or unclear design issues instead of copying them. | Claude Code/Cursor: `/figma-build`; Codex: `$figma-build` |
 | [grill-me](./skills/productivity/grill-me/SKILL.md) | Productivity | Stress-tests a plan or design through relentless, one-at-a-time questioning. | Claude Code/Cursor: `/grill-me`; Codex: `$grill-me` |
 | [write-plan](./skills/productivity/write-plan/SKILL.md) | Productivity | Writes phased implementation plans sized to one AI coding-agent session per phase. | Claude Code/Cursor: `/write-plan`; Codex: `$write-plan` |
 

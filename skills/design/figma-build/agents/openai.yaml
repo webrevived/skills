@@ -1,0 +1,7 @@
+interface:
+  display_name: "Figma Build"
+  short_description: "Implement Figma designs with judgement"
+  default_prompt: "Use $figma-build to implement this Figma design."
+
+policy:
+  allow_implicit_invocation: false

@@ -1,0 +1,40 @@
+---
+name: figma-build
+description: Judgement guardrails for implementing a component or page from a Figma design — token misses, missing states, convention drift, unbuilt features, and when to flag vs. fix. Use when the user shares a Figma URL or frame and wants it built in code.
+disable-model-invocation: true
+---
+
+# Implementing designs from Figma
+
+The design is intent, not gospel. Designers are good but make mistakes — implementing a
+frame verbatim reproduces those mistakes in code. Implement what the design *means*, using
+judgement on what it *shows*. This applies equally to single components and whole pages.
+
+Watch for four failure modes:
+
+1. **Token misses.** A raw value where a design token should be used, or the wrong token
+   (e.g. a hex that's one step off an existing color, a spacing value that isn't on the
+   scale). Map values back to the project's tokens; don't hardcode what Figma renders.
+2. **Missing states.** Designs often show only the happy path. A real component needs its
+   full state set where applicable — hover, focus-visible, active, disabled, loading,
+   error, empty. Add what's missing.
+3. **Consistency drift.** Something that doesn't match the project's existing conventions
+   or sibling components. First decide whether it's a genuine edge case (valid — keep it)
+   or an oversight (fix toward the convention).
+4. **Unbuilt features.** The design shows functionality the codebase doesn't have (a
+   filter with no backing query, a notifications bell with no notifications system). Ask
+   the user before building, stubbing, or dropping it.
+
+## What to do when you find one
+
+- **Trivial and unambiguous** (obvious token swap, clear typo-level inconsistency): make
+  the call yourself, and list what you changed when you're done.
+- **Anything else** (unbuilt features, design-changing fixes, no clearly correct
+  assumption, a state you'd have to invent significant UI for): ask the user before
+  implementing that part — don't silently follow the mistake, and don't silently redesign.
+
+Keep every question short: one or two lines per issue — what you saw, and your
+recommendation. Batch them into one message.
+
+This applies per design — if multiple Figma URLs land in one session, run this check for
+each.
