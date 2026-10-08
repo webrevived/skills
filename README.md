@@ -28,10 +28,11 @@ your home directory instead. `npx skills update` pulls the latest versions.
 
 | Skill | Category | What it does | Invoke |
 | ----- | -------- | ------------ | ------ |
-| [codex-loop](./skills/engineering/codex-loop/SKILL.md) | Engineering | Reviews staged changes with Astra using level-scaled effort and batched skeptic verification, fixes findings, then verifies; use `--model sol` for Sol. | Claude Code/Cursor: `/codex-loop`; Codex: `$codex-loop` |
+| [build-plan](./skills/engineering/build-plan/SKILL.md) | Engineering | Claude Code only. Builds every remaining phase of a `write-plan` plan unattended: one fresh subagent per phase builds, verifies, and runs `codex-loop --auto`; the orchestrator checks the result and commits each phase, never pushes. | Claude Code: `/build-plan <plan-path>` |
+| [codex-loop](./skills/engineering/codex-loop/SKILL.md) | Engineering | Reviews an immutable snapshot of uncommitted changes (or `--base <ref>` → working tree) with Codex, fixes valid findings, and verifies them in bounded rounds; `--auto` for unattended runs, `--model sol` for Sol. | Claude Code/Cursor: `/codex-loop`; Codex: `$codex-loop` |
 | [figma-build](./skills/design/figma-build/SKILL.md) | Design | Implements a component or page from Figma with judgement: maps raw values to tokens, fills missing states, and asks about unbuilt features or unclear design issues instead of copying them. | Claude Code/Cursor: `/figma-build`; Codex: `$figma-build` |
 | [grill-me](./skills/productivity/grill-me/SKILL.md) | Productivity | Stress-tests a plan or design through relentless, one-at-a-time questioning. | Claude Code/Cursor: `/grill-me`; Codex: `$grill-me` |
-| [write-plan](./skills/productivity/write-plan/SKILL.md) | Productivity | Writes phased implementation plans sized to one AI coding-agent session per phase. | Claude Code/Cursor: `/write-plan`; Codex: `$write-plan` |
+| [write-plan](./skills/productivity/write-plan/SKILL.md) | Productivity | Writes phased implementation plans sized to one AI coding-agent session per phase, with per-phase Verify steps and upfront "Needs from user" items; hands off to `build-plan`. | Claude Code/Cursor: `/write-plan`; Codex: `$write-plan` |
 
 ## Contributing
 

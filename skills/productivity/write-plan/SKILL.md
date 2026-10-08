@@ -24,7 +24,7 @@ a human project manager. Every choice below follows from that.
 
 ## Required skeleton
 
-Only these four elements are mandatory. Adapt everything else — section names, extra sections,
+Only these five elements are mandatory. Adapt everything else — section names, extra sections,
 depth, ordering — to what's being planned; a schema design plan and a migration plan should not
 look alike.
 
@@ -32,14 +32,22 @@ look alike.
 2. **Progress tracker**, directly under the goal: a phase/status table using only `not started`,
    `in progress`, `done`, or `blocked`, plus "current phase" and "recommended next phase" lines.
    End it with a literal instruction that the executing agent updates the tracker at the end of
-   its run, noting any deviations in one line each.
-3. **Decisions & context** — everything a fresh session needs that it can't get from the repo:
+   its run, noting deviations and judgment calls in one line each.
+3. **Needs from user**, directly under the tracker: everything an agent cannot do or decide
+   itself — credentials and secrets, infrastructure applies, external accounts or app
+   registrations, test data, decisions deliberately left open — each tagged with the phase that
+   needs it. Write "None" when empty. Phases are executed unattended, so anything missing here
+   surfaces mid-run as a blocked phase.
+4. **Decisions & context** — everything a fresh session needs that it can't get from the repo:
    load-bearing decisions made, rejected alternatives that would otherwise be relitigated,
    constraints, and pointers to the files and docs that matter. If rationale already has a
    durable home in architecture docs or an ADR, link it instead of duplicating it.
-4. **Phases** — each with: goal, what to build (concrete — file paths, names, shapes), a coarse
-   task checklist, and exit criteria another agent or the user can verify, including the exact
-   commands to run. Every phase leaves the repo green (build, lint, test).
+5. **Phases** — each with: goal, what to build (concrete — file paths, names, shapes), a coarse
+   task checklist, exit criteria with the exact commands to run, and a **Verify** section: for
+   user-visible work, concrete browser steps — how to sign in and as whom, URLs, flows to click
+   through, expected results, and the empty/error/permission-denied states; otherwise the
+   end-to-end check (API call, job run, query) with its expected result. Every phase leaves the
+   repo green (build, lint, test).
 
 Include this standing execution rule in the plan: at the start of each phase, verify the plan
 against the live repo and prior-phase deviations. Do not reopen settled decisions without new
@@ -75,14 +83,14 @@ convention requires it.
 
 ## Handoff
 
-End your final message with the kickoff prompt for phase 1, in a code block so it can be copied
-into a fresh session. Keep it dead simple — the plan carries the context, the prompt just points
-at it:
+End your final message with the kickoff in a code block, plus any open "Needs from user" items.
+In Claude Code with the `build-plan` skill installed, `/build-plan` executes every phase
+unattended:
 
 ```
-Read <plan-path> and build phase 1.
+/build-plan <plan-path>
 ```
 
-Add a trailing sentence of extra context only when something matters that the plan can't know
-(e.g. "phase 1's migration is already half-applied locally"). Later phases reuse the same prompt
-shape with the phase number changed, so only show phase 1's.
+To run a single phase instead, in any agent: `Read <plan-path> and build phase 1.` Add a trailing
+sentence only when something matters that the plan can't know (e.g. "phase 1's migration is
+already half-applied locally").

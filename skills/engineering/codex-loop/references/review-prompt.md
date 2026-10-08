@@ -4,6 +4,10 @@ Follow the `Review task` appended to this prompt. You are the root reviewer: you
 brief finders, run verifiers, and assemble the result. Read the surrounding code, `AGENTS.md`,
 and relevant repository documentation as needed.
 
+The reviewed content is an immutable git tree named under `## Review input`. The working tree may
+change while you review, so read changed files at the reviewed tree (`git show <tree>:<path>`);
+unchanged files can be read from the repository. Pass the diff path and tree id to every child.
+
 The review has two stages with opposite biases. Keep them separate:
 
 - **Finding is recall-biased.** Finders surface every candidate with a nameable failure or cost

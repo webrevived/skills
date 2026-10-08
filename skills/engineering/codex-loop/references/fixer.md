@@ -1,12 +1,12 @@
 # Triage and fix
 
-Never `git add`, never `git commit`, never touch the index — fixes land in the working tree only.
+Never `git add`, `git commit`, `git stash`, or switch branches — fixes land in the working tree only.
 
-Read the supplied findings, relevant ledger entries, user constraints, and repository instructions.
-Verify each finding against real code before changing anything. Fix only reported issues and
-necessary consequences of their fixes. Avoid incidental comments, JSDoc, refactors, or cleanup.
-Run appropriate focused checks after related fixes are complete, rather than repeating the same
-suite after each finding. Record the commands and outcomes for the verification reviewer.
+Read the supplied findings, the earlier rounds' findings and dispositions in the run directory,
+user constraints, and repository instructions. Verify each finding against real code before
+changing anything. Fix only reported issues and necessary consequences of their fixes. Avoid
+incidental comments, JSDoc, refactors, or cleanup. Run focused checks after related fixes are
+complete, rather than repeating the same suite after each finding. Record commands and outcomes.
 
 Assign exactly one disposition to every finding, except an unresolved question:
 
@@ -21,12 +21,21 @@ Assign exactly one disposition to every finding, except an unresolved question:
 
 Default real in-scope issues to accepted/modified. Inconvenience, low severity, fix size, or code
 outside originally edited lines does not justify a follow-up. Never choose user-deferred yourself.
-If user intent is required, leave that finding unresolved with a question; do not invent a
-disposition. Record completed triage even when another finding blocks the round.
 
-Before further patching, check prior ledger history for stalemate (a repeated rejection with no
-new evidence) or thrash (three consecutive rounds patching the same invariant and spawning the
-next defect). Return the disagreement/design question instead of another patch.
+**Authority boundary.** A fix may not, unless the plan or user already settled it: change
+user-visible product behavior beyond the stated requirements; weaken authorization, tenant
+isolation, validation, or data guarantees; delete or loosen a test or acceptance criterion without
+proving the behavior stays covered; or perform destructive operations on shared environments.
+When the only correct fix crosses that boundary, leave the finding unresolved with a question.
+
+When the brief says **auto mode**, every other judgment call is yours: decide, apply, and record
+the reasoning in the disposition note. Ask questions only for the boundary above. Outside auto
+mode, also ask when user intent is genuinely required. Record completed triage even when another
+finding blocks the round.
+
+Before further patching, check earlier rounds for stalemate (a repeated rejection with no new
+evidence) or thrash (three consecutive rounds patching the same invariant and spawning the next
+defect). Return the disagreement or design question instead of another patch.
 
 Write the supplied disposition output path as:
 
@@ -34,10 +43,10 @@ Write the supplied disposition output path as:
 {
   "round": 1,
   "dispositions": [{"id": "F1", "disposition": "accepted", "note": "What changed or why rejected."}],
-  "questions": [],
+  "questions": [{"id": "F2", "question": "The decision needed and why it crosses the boundary."}],
   "checks": [{"command": "focused check", "result": "passed, failed, or not run with reason"}]
 }
 ```
 
-Use the actual round and IDs. Each question must identify its finding and needed decision.
-Return a short summary; keep full finding bodies and investigation transcripts in artifacts.
+Use the actual round and IDs. Return a short summary; keep full finding bodies and investigation
+transcripts in artifacts.

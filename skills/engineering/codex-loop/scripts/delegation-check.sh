@@ -13,8 +13,8 @@ set -euo pipefail
 #
 # stdout: `delegation: session=<id> children=<n> depth1=<n> full_diff=<n> effort=<summary>`
 #         followed by one `<depth> <agent_path> calls=<n> secs=<n> diff=<yes|no> effort=<e> rollout=<path>`
-#         line per descendant, with depth relative to the reviewer. `full_diff` counts matching
-#         command-text hints, which can miss valid reads or match mere mentions of staged.diff.
+#         line per descendant, with depth relative to the reviewer. `full_diff` counts children whose
+#         commands mention review.diff: an advisory hint, never proof of a full read.
 #         `effort` includes every recorded turn, so later effort overrides remain visible.
 # exit 0: counted (children may be zero)
 # exit 1: usage or the log has no session id
@@ -61,13 +61,9 @@ child_calls() {
     | gsub("[\r\n]+"; " ")' "$1" 2>/dev/null || true
 }
 
-# A read hint only; execution.md describes how to resolve ambiguous flags from actual outputs.
+# Advisory read hint only.
 read_full_diff() {
-  local calls="$1"
-  grep -q -F 'staged.diff' <<< "$calls" && return 0
-  sed -E 's/git diff --cached[[:space:]]+--(stat|name-only|name-status|numstat|check)[^;&|]*//g' <<< "$calls" \
-    | grep -q -E 'git diff --cached' && return 0
-  return 1
+  grep -q -F 'review.diff' <<< "$1"
 }
 
 child_seconds() {

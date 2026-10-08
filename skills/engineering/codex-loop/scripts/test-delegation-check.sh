@@ -36,10 +36,10 @@ write_rollout() {
   printf '{"timestamp":"2026-01-01T10:01:00.500Z","type":"event_msg","payload":{"type":"noise","parent_thread_id":"%s"}}\n' "$parent_id" >> "$file"
 }
 
-write_rollout c1 "$parent" 1 /root/correctness medium 'git diff --cached --stat' 'git diff --cached' 'cat AGENTS.md'
+write_rollout c1 "$parent" 1 /root/correctness medium 'git diff --stat' "sed -n 1,400p $run_dir/review.diff" 'cat AGENTS.md'
 printf '{"type":"turn_context","payload":{"effort":"xhigh"}}\n' >> "$sessions/rollout-c1.jsonl"
-write_rollout c2 "$parent" 1 /root/contracts xhigh 'git diff --cached --stat && git diff --cached --name-only' 'rg -n foo src'
-write_rollout c3 c1 2 /root/correctness/helper medium "cat $run_dir/staged.diff"
+write_rollout c2 "$parent" 1 /root/contracts xhigh 'git diff --stat && git diff --name-only' 'rg -n foo src'
+write_rollout c3 c1 2 /root/correctness/helper medium "cat $run_dir/review.diff"
 write_rollout x1 "$other" 1 /root/unrelated
 printf '{"type":"session_meta","payload":{"id":"%s","source":"exec"}}\n' "$parent" > "$sessions/rollout-root.jsonl"
 
