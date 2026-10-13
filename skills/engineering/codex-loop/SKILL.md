@@ -1,7 +1,7 @@
 ---
 name: codex-loop
 description: Review uncommitted changes (or a committed range) with Codex, fix valid findings, and verify the fixes in bounded rounds. Use only when the user explicitly asks for codex-loop, or when a plan or orchestrating skill (e.g. build-plan) instructs it — never on your own initiative.
-argument-hint: '[medium|high] [--auto] [--base <ref>] [--model astra|sol] [--rounds N] [review focus]'
+argument-hint: '[medium|high] [--auto] [--base <ref>] [--model sol|astra] [--rounds N] [review focus]'
 ---
 
 **Run this only when the user or an orchestrating skill/plan explicitly asks for it.**
@@ -19,7 +19,8 @@ headlines and dispositions, never full findings, diffs, logs, or child transcrip
 - `--auto`: unattended. The fixer decides judgment calls itself; only authority-boundary
   questions stop the run (see `references/fixer.md`).
 - `--base <ref>`: review `<ref>` → working tree (e.g. a whole branch) instead of HEAD → working tree.
-- `--model astra|sol`: default `astra` = `gpt-6-astra`; `sol` = `gpt-5.6-sol`. Never substitute.
+- `--model sol|astra`: default `sol` = `gpt-6.1-sol`; `astra` = `gpt-6-astra`. Use `astra` only when
+  the user passes it explicitly — never pick it yourself, however sensitive the change. Never substitute.
 - `--rounds N`: automatic round budget, default 3.
 - Remaining text: review focus. Reject `low`, `xhigh`, and unknown or duplicate flags.
 
