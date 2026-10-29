@@ -1,0 +1,7 @@
+interface:
+  display_name: "Merge Worktree"
+  short_description: "Merge a worktree into its parent branch and clean up"
+  default_prompt: "Use $merge-worktree to merge this branch into the branch it came from and remove the worktree."
+
+policy:
+  allow_implicit_invocation: false
