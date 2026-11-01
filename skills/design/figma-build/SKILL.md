@@ -37,4 +37,4 @@ Keep every question short: one or two lines per issue — what you saw, and your
 recommendation. Batch them into one message.
 
 This applies per design — if multiple Figma URLs land in one session, run this check for
-each.
+each
