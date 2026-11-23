@@ -15,8 +15,10 @@ mkdir "$scratch/bin"
 cat > "$scratch/bin/codex" <<'EOF'
 #!/usr/bin/env bash
 out=""
+args=("$@")
 while [[ $# -gt 0 ]]; do [[ "$1" == -o ]] && { out="$2"; shift; }; shift; done
 cat > "${out%.json}.prompt-seen"
+printf '%s\n' "${args[@]}" > "${out%.json}.args-seen"
 sleep "${FAKE_CODEX_SLEEP:-1}"
 printf '{"verdict":"clean"}\n' > "$out"
 exit "${FAKE_CODEX_EXIT:-0}"
@@ -35,11 +37,16 @@ echo b >> "$repo/a.txt"
 run="$scratch/run"
 mkdir "$run"
 printf '%s\n' "$repo" > "$run/repo"
-printf 'gpt-test\n' > "$run/model"
+printf 'gpt-6.2-sol\n' > "$run/model"
 printf 'medium\n' > "$run/review-level"
 printf 'Look at auth.\n' > "$run/focus.md"
 bash "$scripts/round-budget.sh" init "$run" 2
 bash "$scripts/snapshot.sh" init "$run" > /dev/null
+
+# A model id instead of an alias is refused before anything launches.
+set +e; bash "$scripts/review.sh" "$run" 2> /dev/null; status=$?; set -e
+[[ "$status" == 1 && ! -e "$run/round-1.pid" ]] || fail "model id should be refused, got $status"
+printf 'sol\n' > "$run/model"
 
 # Round 1: initial protocol + review input + focus; wait blocks until done.
 [[ "$(bash "$scripts/review.sh" "$run")" == "review: round 1 launched" ]] || fail "launch not reported"
@@ -48,6 +55,8 @@ seen="$run/round-1.prompt-seen"
 grep -q '^## Review level' "$seen" && grep -q '^medium$' "$seen" || fail "level missing from prompt"
 grep -q "Diff file: $run/review.diff" "$seen" || fail "diff path missing from round-1 prompt"
 grep -q 'Look at auth.' "$seen" || fail "focus missing from prompt"
+model_arg() { grep -x -A1 -- -m "$1" | tail -n 1; }
+[[ "$(model_arg "$run/round-1.args-seen")" == gpt-6.2-sol ]] || fail "sol alias not resolved to its model id"
 
 # Retry archives the previous attempt.
 # Archiving happens before review.sh returns, so wait can never see the stale exit file.
@@ -64,8 +73,10 @@ bash "$scripts/round-budget.sh" advance "$run"
 set +e; bash "$scripts/review.sh" "$run" 2> /dev/null; status=$?; set -e
 [[ "$status" == 1 ]] || fail "round 2 without dispositions should refuse to launch"
 printf '{"round":1,"dispositions":[],"questions":[],"checks":[]}\n' > "$run/dispositions-1.json"
+printf 'astra\n' > "$run/model"
 bash "$scripts/review.sh" "$run" > /dev/null
 bash "$scripts/wait.sh" "$run" 30 > /dev/null
+[[ "$(model_arg "$run/round-2.args-seen")" == gpt-6-astra ]] || fail "astra alias not resolved to its model id"
 seen="$run/round-2.prompt-seen"
 grep -q "Latest fixes (round 1): $run/fixes-latest-1.diff" "$seen" || fail "latest fixes missing"
 grep -q "Cumulative fixes since S0: $run/fixes-cumulative-1.diff" "$seen" || fail "cumulative fixes missing"

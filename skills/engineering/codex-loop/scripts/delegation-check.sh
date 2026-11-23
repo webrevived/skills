@@ -11,11 +11,13 @@ set -euo pipefail
 #
 # usage: delegation-check.sh RUN_DIR ROUND [LOG_PATH [SESSIONS_DIR]]
 #
-# stdout: `delegation: session=<id> children=<n> depth1=<n> full_diff=<n> effort=<summary>`
+# stdout: `delegation: session=<id> children=<n> depth1=<n> full_diff=<n> effort=<summary> unrecovered_spawns=<n>`
 #         followed by one `<depth> <agent_path> calls=<n> secs=<n> diff=<yes|no> effort=<e> rollout=<path>`
 #         line per descendant, with depth relative to the reviewer. `full_diff` counts children whose
 #         commands mention review.diff: an advisory hint, never proof of a full read.
 #         `effort` includes every recorded turn, so later effort overrides remain visible.
+#         `unrecovered_spawns` counts child names whose every spawn_agent call failed (for example on
+#         the thread limit), read from the reviewer's own rollout; `unknown` when it is missing.
 # exit 0: counted (children may be zero)
 # exit 1: usage or the log has no session id
 # exit 2: sessions directory unavailable; delegation is unknown, not absent
@@ -42,7 +44,7 @@ session_id="$(sed -n 's/^session id: \([0-9a-fA-F-]*\)$/\1/p' "$log_path" | head
 sessions_dir="${4:-${CODEX_HOME:-$HOME/.codex}/sessions}"
 if [[ ! -d "$sessions_dir" ]]; then
   echo "delegation-check: sessions directory unavailable: $sessions_dir" >&2
-  echo "delegation: session=$session_id children=unknown depth1=unknown full_diff=unknown effort=unknown"
+  echo "delegation: session=$session_id children=unknown depth1=unknown full_diff=unknown effort=unknown unrecovered_spawns=unknown"
   exit 2
 fi
 
@@ -135,7 +137,24 @@ if (( ${#efforts[@]} > 0 )); then
   effort_summary="$(printf '%s\n' "${efforts[@]}" | tr ',' '\n' | sort -u | paste -sd, -)"
 fi
 
-echo "delegation: session=$session_id children=$children depth1=$depth1 full_diff=$full_diff effort=$effort_summary"
+# A spawn that failed and was relaunched under the same name is recovered; one never relaunched
+# means the reviewer may have dropped that child's work without saying so.
+unrecovered=unknown
+root_rollout="$(find "$sessions_dir" -type f -name "rollout-*$session_id.jsonl" -print -quit)"
+if [[ -n "$root_rollout" ]]; then
+  unrecovered="$(jq -s '
+    [.[] | select(.type == "response_item") | .payload] as $p
+    | [$p[] | select(.type == "function_call" and .name == "spawn_agent")
+        | {id: .call_id, name: ((.arguments | fromjson? // {}) | .task_name // "")}] as $calls
+    | ([$p[] | select(.type == "function_call_output") | {key: .call_id, value: (.output | tostring)}]
+        | from_entries) as $out
+    | def spawned: (if type == "string" then (fromjson? // .) else . end)
+        | type == "object" and (.task_name | type == "string") and (has("error") | not);
+      [$calls[] | select($out[.id] // "" | spawned) | .name] as $ok
+    | [$calls[] | .name | select(IN($ok[]) | not)] | unique | length' "$root_rollout")"
+fi
+
+echo "delegation: session=$session_id children=$children depth1=$depth1 full_diff=$full_diff effort=$effort_summary unrecovered_spawns=$unrecovered"
 if (( ${#lines[@]} > 0 )); then
   printf '  %s\n' "${lines[@]}" | sort
 fi

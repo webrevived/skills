@@ -41,6 +41,11 @@ expect() { # expect STATUS DESCRIPTION CMD...
 
 for i in 1 2 3 4; do child "finder_$i" 1 "$parent" medium; done
 child verify_batch_1 1 "$parent" medium
+root_rollout="$sessions/rollout-2026-01-01T10-00-00-$parent.jsonl"
+printf '{"type":"session_meta","payload":{"id":"%s","source":"exec"}}\n' "$parent" > "$root_rollout"
+spawn_failed() { # a spawn_agent call for NAME whose output is a thread-limit error
+  printf '{"type":"response_item","payload":{"type":"function_call","name":"spawn_agent","call_id":"c-%s","arguments":"{\\"task_name\\":\\"%s\\"}"}}\n{"type":"response_item","payload":{"type":"function_call_output","call_id":"c-%s","output":"agent thread limit reached"}}\n' "$1" "$1" "$1" >> "$root_rollout"
+}
 sleep 1
 
 cov='{"finders":4,"verifier_batches":1,"dedicated_verifiers":0,"candidates_assigned":3,"candidates_checked":3}'
@@ -52,8 +57,37 @@ result "$run" 1 "{\"verdict\":\"findings\",\"summary\":\"s\",\"coverage\":$cov,\
 expect 0 "valid round 1" bash "$scripts/validate.sh" "$run" "$scratch/sessions"
 [[ -e "$run/round-1.valid" ]] || fail "valid marker missing"
 
+# Dispositions must cover every finding exactly once with an allowed value.
+disp() { printf '{"round":1,"dispositions":[%s],"questions":[%s],"checks":[]}\n' "$1" "${2:-}" > "$run/dispositions-1.json"; }
+expect 1 "missing dispositions file" bash "$scripts/check-dispositions.sh" "$run"
+disp ''
+expect 1 "finding without disposition" bash "$scripts/check-dispositions.sh" "$run"
+disp '{"id":"F1","disposition":"deferred","note":"n"}'
+expect 1 "unknown disposition value" bash "$scripts/check-dispositions.sh" "$run"
+grep -q 'F1: disposition "deferred"' "$scratch/last.out" || fail "unknown value not named"
+[[ "$(bash "$scripts/outcome.sh" "$run")" == outcome=open*pending=1* ]] || fail "unknown disposition must not close a finding"
+disp '{"id":"F1","disposition":"rejected","note":"n"}' '{"id":"F1","question":"q"}'
+expect 1 "disposition and question for one id" bash "$scripts/check-dispositions.sh" "$run"
+disp '{"id":"F1","disposition":"rejected","note":"n"},{"id":"F2","disposition":"rejected","note":"n"}'
+expect 1 "invented finding id" bash "$scripts/check-dispositions.sh" "$run"
+disp '' '{"id":"F1","question":"q"}'
+expect 0 "question alone is valid" bash "$scripts/check-dispositions.sh" "$run"
+[[ "$(bash "$scripts/outcome.sh" "$run" --stop invalid-dispositions)" == outcome=open*questions=0* ]] \
+  || fail "a rejected dispositions file must not escalate its questions"
+printf '{"round":1,"dispositions":[{"id":"F1","disposition":"rejected","note":"n"}],"questions":[]}\n' >> "$run/dispositions-1.json"
+expect 1 "two concatenated objects" bash "$scripts/check-dispositions.sh" "$run"
+printf '{"round":1,' > "$run/dispositions-1.json"
+expect 1 "truncated JSON" bash "$scripts/check-dispositions.sh" "$run"
+disp '"F1"'
+expect 1 "entry is not an object" bash "$scripts/check-dispositions.sh" "$run"
+grep -q 'string id' "$scratch/last.out" || fail "non-object entry not explained"
+printf '{"round":1,' > "$run/dispositions-1.json"
+[[ "$(bash "$scripts/outcome.sh" "$run" --stop invalid-dispositions)" == outcome=open*pending=1* ]] \
+  || fail "outcome must not read a rejected dispositions file"
+
 # Applied fix not yet verified => open.
-printf '{"round":1,"dispositions":[{"id":"F1","disposition":"accepted","note":"n"}],"questions":[],"checks":[]}\n' > "$run/dispositions-1.json"
+disp '{"id":"F1","disposition":"accepted","note":"n"}'
+expect 0 "valid dispositions" bash "$scripts/check-dispositions.sh" "$run"
 [[ "$(bash "$scripts/outcome.sh" "$run")" == outcome=open* ]] || fail "unverified fix should be open"
 
 # Clean verification round => clean.
@@ -98,5 +132,12 @@ expect 2 "missing telemetry" bash "$scripts/validate.sh" "$run" "$scratch/nowher
 printf '1\n' > "$run/round-1.exit"
 expect 1 "nonzero codex exit" bash "$scripts/validate.sh" "$run" "$scratch/sessions"
 [[ "$(bash "$scripts/outcome.sh" "$run")" == outcome=open*rounds=0* ]] || fail "no valid round should be open"
+
+# A verifier spawn that failed and was never relaunched invalidates the attempt.
+run="$(new_run medium)"
+result "$run" 1 "{\"verdict\":\"clean\",\"summary\":\"s\",\"coverage\":$cov,\"findings\":[],\"unchecked_candidates\":[]}"
+spawn_failed verify_batch_2
+expect 1 "unrecovered verifier spawn" bash "$scripts/validate.sh" "$run" "$scratch/sessions"
+grep -q 'never relaunched' "$scratch/last.out" || fail "unrecovered spawn not named"
 
 echo "test-validate-outcome: ok"

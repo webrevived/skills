@@ -19,8 +19,8 @@ headlines and dispositions, never full findings, diffs, logs, or child transcrip
 - `--auto`: unattended. The fixer decides judgment calls itself; only authority-boundary
   questions stop the run (see `references/fixer.md`).
 - `--base <ref>`: review `<ref>` → working tree (e.g. a whole branch) instead of HEAD → working tree.
-- `--model sol|astra`: default `sol` = `gpt-6.2-sol`; `astra` = `gpt-6-astra`. Use `astra` only when
-  the user passes it explicitly — never pick it yourself, however sensitive the change. Never substitute.
+- `--model sol|astra`: default `sol`. Use `astra` only when the user passes it explicitly — never
+  pick it yourself, however sensitive the change. Save the alias; `review.sh` maps it to the model id.
 - `--rounds N`: automatic round budget, default 3.
 - Remaining text: review focus. Reject `low`, `xhigh`, and unknown or duplicate flags.
 
@@ -33,7 +33,7 @@ tool, never by interpolating it into shell.
 ```bash
 RUN="$(mktemp -d "${TMPDIR:-/tmp}/codex-loop.XXXXXX")"
 git rev-parse --show-toplevel > "$RUN/repo"
-printf '%s\n' "$MODEL" > "$RUN/model"
+printf '%s\n' "$MODEL" > "$RUN/model"          # sol or astra, never a model id
 printf '%s\n' "$LEVEL" > "$RUN/review-level"
 bash "$SKILL_DIR/scripts/round-budget.sh" init "$RUN" "$ROUNDS"
 bash "$SKILL_DIR/scripts/snapshot.sh" init "$RUN" "$BASE"   # omit $BASE for HEAD; exit 4 = nothing to review
@@ -66,11 +66,12 @@ reviewed and will be committed with the change, so flag anything that looks like
 4. **Fix.** Delegate to one fresh subagent without inherited history: repo path, round `N`,
    `$RUN/round-$N.json`, the run directory, output `$RUN/dispositions-$N.json`,
    `$SKILL_DIR/references/fixer.md`, "auto mode" when `--auto`, and only established user
-   constraints. Without delegation, do it yourself per `fixer.md`. Require exactly one disposition
-   or question per finding ID. Questions without `--auto`: ask the user, then send the answers to
-   the same fixer to apply; each answered question moves from `questions` to `dispositions`
-   (`user-deferred` when the user declines the fix). Then run `snapshot.sh check "$RUN"` and
-   `snapshot.sh take "$RUN" "$N"`.
+   constraints. Without delegation, do it yourself per `fixer.md`. Each time the fixer returns, run
+   `bash "$SKILL_DIR/scripts/check-dispositions.sh" "$RUN"`; on failure send its errors to the same
+   fixer once, and stop `invalid-dispositions` if it still fails. Questions without `--auto`: ask
+   the user, then send the answers to the same fixer to apply; each answered question moves from
+   `questions` to `dispositions` (`user-deferred` when the user declines the fix). Then run
+   `snapshot.sh check "$RUN"` and `snapshot.sh take "$RUN" "$N"`.
 5. **Continue or stop.**
    - Questions remain (`--auto`): go to Finish — they escalate.
    - Stalemate or thrash (defined in `fixer.md`): Finish with `--stop stalemate|thrash`.

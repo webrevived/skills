@@ -29,6 +29,13 @@ case "$level" in
   high) deadline=$((60 * 60)) ;;
   *) fail "invalid saved review level: $level" ;;
 esac
+# The only place model ids live: callers save an alias, never an id.
+model_alias="$(cat "$run/model")"
+case "$model_alias" in
+  sol) model=gpt-6.2-sol ;;
+  astra) model=gpt-6-astra ;;
+  *) fail "invalid saved model alias: $model_alias (expected sol or astra)" ;;
+esac
 n="$(bash "$skill_dir/scripts/round-budget.sh" current "$run")"
 prompt="$run/prompt-$n.md"
 
@@ -86,7 +93,7 @@ prepare() {
 run_codex() {
   local log="$run/round-$n.log" pid status elapsed=0 _
   codex exec -C "$(cat "$run/repo")" \
-    -m "$(cat "$run/model")" -c "model_reasoning_effort=\"$level\"" \
+    -m "$model" -c "model_reasoning_effort=\"$level\"" \
     -c "agents.default_subagent_reasoning_effort=\"$level\"" \
     -c agents.max_concurrent_threads_per_session=12 \
     -c memories.use_memories=false \

@@ -41,13 +41,21 @@ printf '{"type":"turn_context","payload":{"effort":"xhigh"}}\n' >> "$sessions/ro
 write_rollout c2 "$parent" 1 /root/contracts xhigh 'git diff --stat && git diff --name-only' 'rg -n foo src'
 write_rollout c3 c1 2 /root/correctness/helper medium "cat $run_dir/review.diff"
 write_rollout x1 "$other" 1 /root/unrelated
-printf '{"type":"session_meta","payload":{"id":"%s","source":"exec"}}\n' "$parent" > "$sessions/rollout-root.jsonl"
+root_rollout="$sessions/rollout-2026-01-01T10-00-00-$parent.jsonl"
+printf '{"type":"session_meta","payload":{"id":"%s","source":"exec"}}\n' "$parent" > "$root_rollout"
+spawn() { # spawn CALL_ID NAME OUTPUT — one spawn_agent call and its output in the reviewer rollout
+  printf '{"type":"response_item","payload":{"type":"function_call","name":"spawn_agent","call_id":"%s","arguments":"{\\"task_name\\":\\"%s\\"}"}}\n' "$1" "$2" >> "$root_rollout"
+  printf '{"type":"response_item","payload":{"type":"function_call_output","call_id":"%s","output":%s}}\n' "$1" "$3" >> "$root_rollout"
+}
+spawn s1 finder_1 '"{\"task_name\":\"/root/finder_1\"}"'
+spawn s2 verify_batch_1 '"agent thread limit reached"'
+spawn s3 verify_batch_1 '"{\"task_name\":\"/root/verify_batch_1\"}"'
 
 sleep 1
 printf 'OpenAI Codex v0.0.0\nsession id: %s\nuser\n' "$parent" > "$run_dir/round-1.log"
 
 output="$(run_helper)"
-expected="delegation: session=$parent children=3 depth1=2 full_diff=2 effort=medium,xhigh
+expected="delegation: session=$parent children=3 depth1=2 full_diff=2 effort=medium,xhigh unrecovered_spawns=0
   1 /root/contracts calls=2 secs=60 diff=no effort=xhigh rollout=$sessions/rollout-c2.jsonl
   1 /root/correctness calls=3 secs=60 diff=yes effort=medium,xhigh rollout=$sessions/rollout-c1.jsonl
   2 /root/correctness/helper calls=1 secs=60 diff=yes effort=medium rollout=$sessions/rollout-c3.jsonl"
@@ -86,12 +94,17 @@ fi
 # No matching descendants is a valid count, not a parsing failure.
 printf 'session id: 01a00000-0000-7000-8000-000000000099\n' > "$run_dir/round-3.log"
 output="$(run_helper 3)"
-[[ "$output" == *'children=0 depth1=0 full_diff=0 effort=none' ]] || exit 1
+[[ "$output" == *'children=0 depth1=0 full_diff=0 effort=none unrecovered_spawns=unknown' ]] || exit 1
 
 # Missing effort on a later turn must not be hidden by the first turn's value.
 printf '{"type":"turn_context","payload":{}}\n' >> "$sessions/rollout-c3.jsonl"
 printf 'session id: %s\n' "$parent" > "$run_dir/round-4.log"
 output="$(run_helper 4)"
 [[ "$output" == *'/root/correctness/helper calls=1 secs=60 diff=yes effort=medium,unknown'* ]] || exit 1
+
+# A spawn that failed and was never relaunched is reported, even when its error echoes the name.
+spawn s4 verify_batch_2 '{"error":"agent thread limit reached","task_name":"verify_batch_2"}'
+output="$(run_helper)"
+[[ "$(head -n 1 <<< "$output")" == *' unrecovered_spawns=1' ]] || { echo "test-delegation-check: unrecovered spawn not counted" >&2; exit 1; }
 
 echo "test-delegation-check: ok"

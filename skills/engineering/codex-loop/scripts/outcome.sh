@@ -6,12 +6,13 @@ set -euo pipefail
 #
 # usage: outcome.sh RUN_DIR [--stop REASON]
 #   --stop REASON  record why the loop stopped early (stalemate, thrash, budget, review-failed,
-#                  telemetry-unknown, baseline-drift); stalemate/thrash escalate, others are open.
+#                  telemetry-unknown, baseline-drift, invalid-dispositions); stalemate/thrash
+#                  escalate, others are open.
 #
 # clean    — last valid review is clean, or its findings were all closed without applied fixes,
 #            and initial coverage is complete
 # open     — applied fixes await verification, initial candidates are unchecked, findings lack
-#            dispositions, no valid review exists, or the loop stopped early
+#            a closing disposition, no valid review exists, or the loop stopped early
 # escalate — an unresolved question or a stalemate/thrash needs a human decision
 
 run="${1:?usage: outcome.sh RUN_DIR [--stop REASON]}"
@@ -29,19 +30,27 @@ done
 empty='{"findings":[],"unchecked_candidates":[]}'
 r1="$empty"; [[ -e "$run/round-1.valid" ]] && r1="$(cat "$run/round-1.json")"
 rl="$empty"; (( last > 0 )) && rl="$(cat "$run/round-$last.json")"
+# A rejected dispositions file is never read: its findings stay pending, its questions don't escalate.
+rejected=""
+[[ "$stop" == invalid-dispositions ]] && rejected="$run/dispositions-$last.json"
 dl='{"dispositions":[],"questions":[]}'
-(( last > 0 )) && [[ -s "$run/dispositions-$last.json" ]] && dl="$(cat "$run/dispositions-$last.json")"
+(( last > 0 )) && [[ -s "$run/dispositions-$last.json" && -z "$rejected" ]] && dl="$(cat "$run/dispositions-$last.json")"
+files=()
+for f in "$run"/dispositions-*.json; do
+  [[ -e "$f" && "$f" != "$rejected" ]] && files+=("$f")
+done
 all_dispositions='[]'
-if compgen -G "$run/dispositions-*.json" > /dev/null; then
-  all_dispositions="$(jq -s '[.[].dispositions[]?]' "$run"/dispositions-*.json)"
-fi
+(( ${#files[@]} > 0 )) && all_dispositions="$(jq -s '[.[].dispositions[]?]' "${files[@]}")"
 
 jq -n \
   --argjson last "$last" --arg stop "$stop" --arg level "$(cat "$run/review-level")" \
   --argjson r1 "$r1" --argjson rl "$rl" --argjson dl "$dl" --argjson all "$all_dispositions" '
   ($dl.dispositions | map({key: .id, value: .disposition}) | from_entries) as $disp
-  | ($rl.findings | map(select(($disp[.id] // "none") | IN("accepted", "modified", "none")))
-      | map({id: "R\($last)-\(.id)", title, file, line, state: (if $disp[.id] then "fix unverified" else "no disposition" end)})) as $pending
+  | ($rl.findings | map(($disp[.id] // "none") as $d
+      | select($d | IN("rejected", "outside-review", "separate-follow-up", "user-deferred") | not)
+      | {id: "R\($last)-\(.id)", title, file, line,
+         state: (if $d | IN("accepted", "modified") then "fix unverified"
+                 elif $d == "none" then "no disposition" else "invalid disposition \($d)" end)})) as $pending
   | ($r1.unchecked_candidates | map({id, file, line, summary, reason})) as $unchecked
   | ($dl.questions // []) as $questions
   | ($all | map(select(.disposition == "separate-follow-up"))) as $follow

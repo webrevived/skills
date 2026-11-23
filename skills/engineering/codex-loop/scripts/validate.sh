@@ -42,7 +42,6 @@ check '.verdict == "incomplete" or ((.verdict == "findings") == ((.findings | le
 check '[.findings[].id] | (length == (unique | length)) and all(test("^F[1-9][0-9]*$"))' "finding ids not unique F1..Fn"
 check '[.unchecked_candidates[].id] | length == (unique | length)' "duplicate unchecked candidate ids"
 check 'all(.findings[]; .line >= 1)' "non-positive line"
-grep -q 'agent thread limit reached' "$log" 2> /dev/null && err "reviewer hit the agent thread limit; coverage is not what the level promised"
 
 if [[ "$n" == 1 ]]; then
   case "$level" in
@@ -69,6 +68,12 @@ if [[ "$n" == 1 ]]; then
   children="$(sed -n 's/.* children=\([0-9]*\).*/\1/p' <<< "$header")"
   depth1="$(sed -n 's/.* depth1=\([0-9]*\).*/\1/p' <<< "$header")"
   effort="$(sed -n 's/.* effort=\([^ ]*\).*/\1/p' <<< "$header")"
+  unrecovered="$(sed -n 's/.* unrecovered_spawns=\([^ ]*\).*/\1/p' <<< "$header")"
+  if [[ "$unrecovered" == unknown ]]; then
+    echo "validate: reviewer rollout not found; spawn failures unknown" >&2
+    exit 2
+  fi
+  [[ "$unrecovered" == 0 ]] || err "$unrecovered child spawn(s) failed and were never relaunched; coverage is not what the level promised"
   expected="$(jq '.coverage | .finders + .verifier_batches + .dedicated_verifiers' "$out")"
   [[ "$children" == "$depth1" ]] || err "nested delegation ($children children, $depth1 direct)"
   [[ "$children" == "$expected" ]] || err "telemetry shows $children children, coverage claims $expected"
