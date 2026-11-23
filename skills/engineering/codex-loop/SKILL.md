@@ -19,7 +19,7 @@ headlines and dispositions, never full findings, diffs, logs, or child transcrip
 - `--auto`: unattended. The fixer decides judgment calls itself; only authority-boundary
   questions stop the run (see `references/fixer.md`).
 - `--base <ref>`: review `<ref>` → working tree (e.g. a whole branch) instead of HEAD → working tree.
-- `--model sol|astra`: default `sol` = `gpt-6.1-sol`; `astra` = `gpt-6-astra`. Use `astra` only when
+- `--model sol|astra`: default `sol` = `gpt-6.2-sol`; `astra` = `gpt-6-astra`. Use `astra` only when
   the user passes it explicitly — never pick it yourself, however sensitive the change. Never substitute.
 - `--rounds N`: automatic round budget, default 3.
 - Remaining text: review focus. Reject `low`, `xhigh`, and unknown or duplicate flags.
