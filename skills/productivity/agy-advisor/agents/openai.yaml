@@ -1,0 +1,7 @@
+interface:
+  display_name: "Agy Advisor"
+  short_description: "Adversarial second opinion on a plan from agy"
+  default_prompt: "Use $agy-advisor to adversarially review the plan we discussed."
+
+policy:
+  allow_implicit_invocation: false

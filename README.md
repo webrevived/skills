@@ -28,6 +28,8 @@ your home directory instead. `npx skills update` pulls the latest versions.
 
 | Skill | Category | What it does | Invoke |
 | ----- | -------- | ------------ | ------ |
+| [agy-advisor](./skills/productivity/agy-advisor/SKILL.md) | Productivity | Gets an adversarial second opinion on a plan or decision from the `agy` CLI (Gemini 4 Neon), then weighs it and reports what to change. | Claude Code/Cursor: `/agy-advisor`; Codex: `$agy-advisor` |
+| [agy-loop](./skills/engineering/agy-loop/SKILL.md) | Engineering | Reviews uncommitted changes with the `agy` CLI (Gemini 4 Neon), fixes valid findings, and runs focused re-reviews of the fixes until clean. | Claude Code/Cursor: `/agy-loop`; Codex: `$agy-loop` |
 | [build-plan](./skills/engineering/build-plan/SKILL.md) | Engineering | Claude Code only. Builds every remaining phase of a `write-plan` plan unattended: one fresh subagent per phase builds, verifies, and runs `codex-loop --auto`; the orchestrator checks the result and commits each phase, never pushes. | Claude Code: `/build-plan <plan-path>` |
 | [codex-loop](./skills/engineering/codex-loop/SKILL.md) | Engineering | Reviews an immutable snapshot of uncommitted changes (or `--base <ref>` → working tree) with Codex, fixes valid findings, and verifies them in bounded rounds; `--auto` for unattended runs, `--model astra` for Astra. | Claude Code/Cursor: `/codex-loop`; Codex: `$codex-loop` |
 | [figma-build](./skills/design/figma-build/SKILL.md) | Design | Implements a component or page from Figma with judgement: maps raw values to tokens, fills missing states, and asks about unbuilt features or unclear design issues instead of copying them. | Claude Code/Cursor: `/figma-build`; Codex: `$figma-build` |

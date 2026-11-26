@@ -1,0 +1,7 @@
+interface:
+  display_name: "Agy Loop"
+  short_description: "agy code review with fix and focused re-review until clean"
+  default_prompt: "Use $agy-loop to review the uncommitted changes with agy, fix valid findings, and re-review the fixes until clean."
+
+policy:
+  allow_implicit_invocation: false
