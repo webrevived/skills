@@ -1,0 +1,7 @@
+interface:
+  display_name: "Council"
+  short_description: "Codex + agy adversarial review of a plan, judged and summarized"
+  default_prompt: "Use $council to review the plan we discussed."
+
+policy:
+  allow_implicit_invocation: false
