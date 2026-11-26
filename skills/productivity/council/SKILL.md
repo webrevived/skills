@@ -30,20 +30,21 @@ and not to edit any files.
 
 ## 2. Run both at once
 
-From the repo root, start both in the background and wait for both:
+From the repo root, run both concurrently as one command:
 
 ```bash
 codex exec -m gpt-6-astra -c model_reasoning_effort="high" -s read-only \
-  -o "$OUT/codex.md" - < "$BRIEF_FILE" > "$OUT/codex.log" 2>&1
-
+  -o "$OUT/codex.md" - < "$BRIEF_FILE" > "$OUT/codex.log" 2>&1 &
 agy -p "$(cat "$BRIEF_FILE")" --model gemini-4-neon-xhigh --output-format json \
-  > "$OUT/agy.json" 2> "$OUT/agy.log"
+  > "$OUT/agy.json" 2> "$OUT/agy.log" &
+wait
 ```
 
 - Codex's review is `$OUT/codex.md`; agy's is `response` in `$OUT/agy.json`.
 - Don't add flags. In particular, don't pass `--mode` to agy: `plan` and `accept-edits`
   block the shell commands it needs to read the repo headless.
-- Each run takes minutes. Use long timeouts; don't end your turn while they run.
+- Each run takes minutes. Use a long timeout, or run the whole command in the background
+  and wait for it; don't end your turn while it runs.
 - If one fails, report that and continue with the other. Don't retry with extra flags.
 - Use different models only if the user names them.
 
@@ -68,4 +69,4 @@ In plain language, short:
 
 Don't change the plan until the user agrees. For follow-ups, resume agy with
 `-r <conversation_id>` from `agy.json`, and Codex with
-`codex exec resume <session id from codex.log> "<question>"`.
+`codex exec resume <session id from codex.log> -m gpt-6-astra -c model_reasoning_effort="high" "<question>"`.

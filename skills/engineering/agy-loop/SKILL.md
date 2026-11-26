@@ -27,6 +27,8 @@ agy -p "$(cat "$PROMPT_FILE")" --model gemini-4-neon-high --output-format json
 Scope is the uncommitted changes (staged, unstaged, and untracked) unless the user names a
 base ref or other scope. Don't paste the diff; agy runs git itself. Prompt agy to:
 
+- Include untracked files: `git diff` doesn't show them, so check `git status` and read
+  new files directly.
 - Review the scope for bugs, security issues, performance problems, and unnecessary
   complexity, plus anything in the user's focus.
 - Read surrounding code as needed to judge the changes.
