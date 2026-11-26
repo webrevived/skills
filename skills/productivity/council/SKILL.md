@@ -24,9 +24,12 @@ agreement means something:
 Leave out your own doubts; let the reviewers find problems independently.
 
 Ask each to attack it: find what's wrong, missing, risky, overcomplicated, or built on a
-false assumption, and propose a better alternative where one exists. Tell it to check
-claims against the codebase rather than trust the brief, to rank its concerns by impact,
-and not to edit any files.
+false assumption, and propose a better alternative where one exists. Tell it to rank its
+concerns by impact and not to edit any files.
+
+Also tell it to verify the plan's core claims and assumptions — about this codebase,
+libraries, APIs, and platform behavior — against the actual code and docs, not the brief,
+and to call out any that are false and what would break.
 
 ## 2. Run both at once
 
